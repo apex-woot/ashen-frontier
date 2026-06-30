@@ -93,6 +93,11 @@ impl UnitId {
     pub const fn new(value: u32) -> Self {
         Self(value)
     }
+
+    #[must_use]
+    pub const fn value(self) -> u32 {
+        self.0
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -109,6 +114,11 @@ impl EnemyId {
     #[must_use]
     pub const fn new(value: u32) -> Self {
         Self(value)
+    }
+
+    #[must_use]
+    pub const fn value(self) -> u32 {
+        self.0
     }
 }
 
@@ -273,6 +283,12 @@ impl GameWorld {
             .collect()
     }
 
+    /// Issues a move order for the selected units.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CommandRejection`] when the selection is empty, the destination is invalid,
+    /// no path exists, or one of the unit ids is unknown.
     pub fn move_units(
         &mut self,
         units: &[UnitId],

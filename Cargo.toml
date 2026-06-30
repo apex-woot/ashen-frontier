@@ -5,11 +5,14 @@ edition = "2024"
 license = "UNLICENSED"
 rust-version = "1.96"
 
+[lib]
+crate-type = ["rlib", "staticlib"]
+
 [dependencies]
 bevy = "0.19.0"
 
 [lints.rust]
-unsafe_code = "forbid"
+unsafe_code = "allow"
 
 [lints.clippy]
 all = "warn"

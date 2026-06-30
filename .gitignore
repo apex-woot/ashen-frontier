@@ -1,2 +1,3 @@
 /target/
-
+/apple/macos/.build/
+/apple/macos/.swiftpm/

@@ -2,7 +2,7 @@
 
 `ashen-frontier` is a **prototype shell first, game engine second**.
 
-Right now, the visible app is driven by `bevy` in `src/main.rs`, while the real game rules live in `src/sim.rs`.
+Right now, the visible prototype app is driven by `bevy` in `src/main.rs`, while the real game rules live in `src/sim.rs`. A first macOS Swift/Metal shell lives under `apple/macos` and talks to the same Rust simulation through `src/ffi.rs`.
 
 ## Two modules, two responsibilities
 
@@ -14,7 +14,17 @@ Right now, the visible app is driven by `bevy` in `src/main.rs`, while the real 
 ### `src/sim.rs`
 - Holds pure gameplay simulation logic (entities, turns, rules, combat, win conditions, state transitions).
 - Should avoid direct Bevy types when possible, so it can be reused elsewhere.
-- Becomes the extraction target for a later Swift/Metal runtime.
+- Is consumed by both the Bevy prototype and the Swift/Metal shell.
+
+### `src/ffi.rs`
+- Exposes a small C ABI for Apple callers.
+- Owns the unsafe raw-pointer boundary.
+- Keeps Swift away from Rust internals by exporting flat position snapshots.
+
+### `apple/macos`
+- Swift Package that can be opened in Xcode.
+- Owns the macOS window, AppKit lifecycle, MetalKit view, and Metal renderer.
+- Links against the Rust static library built by `cargo build --release --lib`.
 
 ## Why this split
 
@@ -35,10 +45,13 @@ Think of `sim` as the "headquarters" and `src/main.rs` as the "front desk."
 ## Platform path
 
 - First target: **macOS** (desktop prototype, single-window shell).
-- Later: **iPadOS/iOS** and **Swift/Metal** renderer where the Bevy shell may be replaced, but `sim` stays and keeps gameplay behavior consistent.
+- Current Apple spike: **macOS Swift/Metal** shell through the Rust C ABI.
+- Later: **iPadOS/iOS** renderer using the same ABI shape, with platform-specific lifecycle/input code in Swift.
 
 ## File-level expectation
 
 - Keep this in mind when adding files:
   - `src/sim.rs` or `src/sim/...` → game data types, systems, deterministic updates.
+  - `src/ffi.rs` → C ABI boundary for Apple/native shells.
   - `src/main.rs` or `src/app/...` → Bevy scenes, schedules, input adapters, UI/audio debug hooks.
+  - `apple/macos/...` → Swift, AppKit, MetalKit, and `.metal` shader code.

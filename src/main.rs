@@ -2,13 +2,12 @@
 
 use std::collections::HashSet;
 
+use ashen_frontier::sim::{
+    Enemy, EnemyId, GameWorld, GridSize, TerrainCell, Unit, UnitId, WorldPoint, WorldRect,
+};
 use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use bevy::prelude::*;
 use bevy::window::{PresentMode, PrimaryWindow};
-
-mod sim;
-
-use sim::{Enemy, EnemyId, GameWorld, GridSize, TerrainCell, Unit, UnitId, WorldPoint, WorldRect};
 
 const GRID_WIDTH: u16 = 32;
 const GRID_HEIGHT: u16 = 24;
