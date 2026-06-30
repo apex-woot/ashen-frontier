@@ -6,8 +6,8 @@ use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use bevy::prelude::*;
 use bevy::window::{PresentMode, PrimaryWindow};
 use game_sim::{
-    Command, CommandResult, GameWorld, GridSize, SimConfig, TerrainCell, Unit, UnitId, WorldPoint,
-    WorldRect,
+    Command, CommandResult, Enemy, EnemyId, GameWorld, GridSize, SimConfig, TerrainCell, Unit,
+    UnitId, WorldPoint, WorldRect,
 };
 
 const GRID_WIDTH: u16 = 32;
@@ -20,6 +20,7 @@ const DRAG_SELECT_THRESHOLD_PIXELS: f32 = 6.0;
 const STRESS_PRESET_SMALL: usize = 100;
 const STRESS_PRESET_MEDIUM: usize = 1_000;
 const STRESS_PRESET_LARGE: usize = 5_000;
+const HORDE_PRESET_COUNT: usize = 64;
 
 fn main() {
     App::new()
@@ -55,6 +56,7 @@ fn main() {
                 apply_stress_hotkeys,
                 tick_simulation,
                 sync_unit_visuals,
+                sync_enemy_visuals,
                 update_hud_text,
                 draw_world,
             )
@@ -112,6 +114,11 @@ struct UnitVisual {
 }
 
 #[derive(Component)]
+struct EnemyVisual {
+    id: EnemyId,
+}
+
+#[derive(Component)]
 struct BuildingVisual;
 
 #[derive(Component)]
@@ -121,6 +128,7 @@ struct HudText;
 struct HudStats {
     fps: Option<f64>,
     unit_count: usize,
+    enemy_count: usize,
     selected_count: usize,
     tick: u64,
     blocked_cell_count: usize,
@@ -135,6 +143,7 @@ fn setup(mut commands: Commands, sim: Res<SimResource>) {
         Text::new(format_hud(HudStats {
             fps: None,
             unit_count: sim.world.units().len(),
+            enemy_count: sim.world.enemies().len(),
             selected_count: 0,
             tick: sim.world.tick(),
             blocked_cell_count: sim.world.blocked_cell_count(),
@@ -169,6 +178,10 @@ fn setup(mut commands: Commands, sim: Res<SimResource>) {
 
     for unit in sim.world.units() {
         spawn_unit_visual(&mut commands, unit, grid_size);
+    }
+
+    for enemy in sim.world.enemies() {
+        spawn_enemy_visual(&mut commands, enemy, grid_size);
     }
 }
 
@@ -353,6 +366,10 @@ fn apply_stress_hotkeys(
         selection.units.clear();
     }
 
+    if keys.just_pressed(KeyCode::KeyH) {
+        sim.world.spawn_horde(HORDE_PRESET_COUNT);
+    }
+
     if keys.just_pressed(KeyCode::KeyR) {
         sim.world = new_world();
         sim.accumulator = 0.0;
@@ -409,6 +426,41 @@ fn sync_unit_visuals(
     }
 }
 
+fn sync_enemy_visuals(
+    mut commands: Commands,
+    sim: Res<SimResource>,
+    mut enemies: Query<(Entity, &EnemyVisual, &mut Transform)>,
+) {
+    let grid_size = sim.world.grid_size();
+    let simulated_ids = sim
+        .world
+        .enemies()
+        .iter()
+        .map(|enemy| enemy.id)
+        .collect::<HashSet<_>>();
+    let mut visual_ids = HashSet::with_capacity(simulated_ids.len());
+
+    for (entity, visual, mut transform) in &mut enemies {
+        if !simulated_ids.contains(&visual.id) {
+            commands.entity(entity).despawn();
+            continue;
+        }
+
+        visual_ids.insert(visual.id);
+        let Some(enemy) = sim.world.enemy(visual.id) else {
+            continue;
+        };
+
+        transform.translation = world_to_translation(enemy.position, grid_size, 2.1);
+    }
+
+    for enemy in sim.world.enemies() {
+        if !visual_ids.contains(&enemy.id) {
+            spawn_enemy_visual(&mut commands, enemy, grid_size);
+        }
+    }
+}
+
 fn update_hud_text(
     diagnostics: Res<DiagnosticsStore>,
     sim: Res<SimResource>,
@@ -422,6 +474,7 @@ fn update_hud_text(
     let stats = HudStats {
         fps,
         unit_count: sim.world.units().len(),
+        enemy_count: sim.world.enemies().len(),
         selected_count: selection.units.len(),
         tick: sim.world.tick(),
         blocked_cell_count: sim.world.blocked_cell_count(),
@@ -549,6 +602,14 @@ fn spawn_unit_visual(commands: &mut Commands, unit: &Unit, grid_size: GridSize) 
     ));
 }
 
+fn spawn_enemy_visual(commands: &mut Commands, enemy: &Enemy, grid_size: GridSize) {
+    commands.spawn((
+        Sprite::from_color(Color::srgb(0.78, 0.18, 0.16), Vec2::splat(TILE_SIZE * 0.38)),
+        Transform::from_translation(world_to_translation(enemy.position, grid_size, 2.1)),
+        EnemyVisual { id: enemy.id },
+    ));
+}
+
 fn unit_color(selected: bool) -> Color {
     if selected {
         Color::srgb(0.95, 0.86, 0.34)
@@ -623,9 +684,10 @@ fn format_fps(fps: Option<f64>) -> String {
 
 fn format_hud(stats: HudStats) -> String {
     format!(
-        "{}\nUnits: {}\nSelected: {}\nTick: {}\nBlocked: {}\nMode: {}\nVSync: off\nHotkeys: B=mode 1=100 2=1000 3=5000 R=reset",
+        "{}\nUnits: {}\nEnemies: {}\nSelected: {}\nTick: {}\nBlocked: {}\nMode: {}\nVSync: off\nHotkeys: B=mode H=horde 1=100 2=1000 3=5000 R=reset",
         format_fps(stats.fps),
         stats.unit_count,
+        stats.enemy_count,
         stats.selected_count,
         stats.tick,
         stats.blocked_cell_count,
@@ -652,6 +714,7 @@ mod tests {
         let stats = HudStats {
             fps: Some(144.46),
             unit_count: 1_000,
+            enemy_count: 64,
             selected_count: 12,
             tick: 42,
             blocked_cell_count: 8,
@@ -660,7 +723,7 @@ mod tests {
 
         assert_eq!(
             format_hud(stats),
-            "FPS: 144.5\nUnits: 1000\nSelected: 12\nTick: 42\nBlocked: 8\nMode: paint blocked\nVSync: off\nHotkeys: B=mode 1=100 2=1000 3=5000 R=reset"
+            "FPS: 144.5\nUnits: 1000\nEnemies: 64\nSelected: 12\nTick: 42\nBlocked: 8\nMode: paint blocked\nVSync: off\nHotkeys: B=mode H=horde 1=100 2=1000 3=5000 R=reset"
         );
     }
 

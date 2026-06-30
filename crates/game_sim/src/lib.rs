@@ -2,6 +2,7 @@ use std::collections::VecDeque;
 
 const STARTING_WORKERS: usize = 6;
 const WORKER_SPEED_PER_TICK: f32 = 1.5;
+const ENEMY_SPEED_PER_TICK: f32 = 0.9;
 const GROUP_MOVE_SPACING: f32 = 0.8;
 const PATH_NEIGHBORS: [(i16, i16); 4] = [(1, 0), (0, 1), (-1, 0), (0, -1)];
 
@@ -142,6 +143,35 @@ pub struct Unit {
     path: Vec<WorldPoint>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct EnemyId(u32);
+
+impl EnemyId {
+    #[must_use]
+    pub const fn new(value: u32) -> Self {
+        Self(value)
+    }
+
+    #[must_use]
+    pub const fn value(self) -> u32 {
+        self.0
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EnemyKind {
+    Grunt,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Enemy {
+    pub id: EnemyId,
+    pub kind: EnemyKind,
+    pub position: WorldPoint,
+    pub target: Option<WorldPoint>,
+    path: Vec<WorldPoint>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BuildingKind {
     CommandCenter,
@@ -183,6 +213,8 @@ pub struct GameWorld {
     seed: u64,
     tick: u64,
     units: Vec<Unit>,
+    enemies: Vec<Enemy>,
+    next_enemy_id: u32,
     buildings: Vec<Building>,
     terrain: Vec<TerrainCell>,
 }
@@ -196,6 +228,8 @@ impl GameWorld {
             seed,
             tick: 0,
             units: Vec::with_capacity(STARTING_WORKERS),
+            enemies: Vec::new(),
+            next_enemy_id: 1,
             buildings: vec![Building {
                 id: BuildingId::new(1),
                 kind: BuildingKind::CommandCenter,
@@ -221,6 +255,11 @@ impl GameWorld {
     #[must_use]
     pub fn units(&self) -> &[Unit] {
         &self.units
+    }
+
+    #[must_use]
+    pub fn enemies(&self) -> &[Enemy] {
+        &self.enemies
     }
 
     #[must_use]
@@ -301,6 +340,11 @@ impl GameWorld {
     }
 
     #[must_use]
+    pub fn enemy(&self, id: EnemyId) -> Option<&Enemy> {
+        self.enemies.iter().find(|enemy| enemy.id == id)
+    }
+
+    #[must_use]
     pub fn select_units(&self, rect: WorldRect) -> Vec<UnitId> {
         self.units
             .iter()
@@ -363,11 +407,39 @@ impl GameWorld {
         }
     }
 
+    pub fn spawn_horde(&mut self, enemy_count: usize) {
+        let Some(target) = self.command_center_target() else {
+            return;
+        };
+
+        self.enemies.reserve(enemy_count);
+        for _ in 0..enemy_count {
+            let id = EnemyId::new(self.next_enemy_id);
+            self.next_enemy_id = self.next_enemy_id.saturating_add(1);
+
+            let spawn_index = usize::try_from(id.value().saturating_sub(1)).unwrap_or(usize::MAX);
+            let position = horde_spawn_position(spawn_index, self.config.grid_size);
+            let path = find_path(position, target, &self.terrain, self.config.grid_size);
+            let has_path = path.is_some();
+
+            self.enemies.push(Enemy {
+                id,
+                kind: EnemyKind::Grunt,
+                position,
+                target: has_path.then_some(target),
+                path: path.unwrap_or_default(),
+            });
+        }
+    }
+
     pub fn step(&mut self, steps: u32) {
         for _ in 0..steps {
             self.tick = self.tick.saturating_add(1);
             for unit in &mut self.units {
                 move_unit_toward_target(unit, &self.terrain, self.config.grid_size);
+            }
+            for enemy in &mut self.enemies {
+                move_enemy_toward_target(enemy, &self.terrain, self.config.grid_size);
             }
         }
     }
@@ -447,6 +519,28 @@ impl GameWorld {
             }
         }
 
+        hash.write_u32(self.next_enemy_id);
+        for enemy in &self.enemies {
+            hash.write_u32(enemy.id.value());
+            hash.write_u32(match enemy.kind {
+                EnemyKind::Grunt => 1,
+            });
+            hash.write_f32(enemy.position.x);
+            hash.write_f32(enemy.position.y);
+            if let Some(target) = enemy.target {
+                hash.write_u32(1);
+                hash.write_f32(target.x);
+                hash.write_f32(target.y);
+            } else {
+                hash.write_u32(0);
+            }
+            hash.write_u32(u32::try_from(enemy.path.len()).unwrap_or(u32::MAX));
+            for waypoint in &enemy.path {
+                hash.write_f32(waypoint.x);
+                hash.write_f32(waypoint.y);
+            }
+        }
+
         hash.finish()
     }
 
@@ -506,6 +600,16 @@ impl GameWorld {
             u16::try_from(index / width).ok()?,
         ))
     }
+
+    fn command_center_target(&self) -> Option<WorldPoint> {
+        let center = self
+            .buildings
+            .iter()
+            .find(|building| building.kind == BuildingKind::CommandCenter)?
+            .position;
+
+        Some(grid_cell_center(center))
+    }
 }
 
 fn stress_jitter(slot: usize) -> f32 {
@@ -559,48 +663,77 @@ fn clamp_world_point(point: WorldPoint, grid_size: GridSize) -> WorldPoint {
 }
 
 fn move_unit_toward_target(unit: &mut Unit, terrain: &[TerrainCell], grid_size: GridSize) {
-    let Some(target) = unit.path.first().copied().or(unit.target) else {
+    move_agent_toward_target(
+        &mut unit.position,
+        &mut unit.target,
+        &mut unit.path,
+        WORKER_SPEED_PER_TICK,
+        terrain,
+        grid_size,
+    );
+}
+
+fn move_enemy_toward_target(enemy: &mut Enemy, terrain: &[TerrainCell], grid_size: GridSize) {
+    move_agent_toward_target(
+        &mut enemy.position,
+        &mut enemy.target,
+        &mut enemy.path,
+        ENEMY_SPEED_PER_TICK,
+        terrain,
+        grid_size,
+    );
+}
+
+fn move_agent_toward_target(
+    position: &mut WorldPoint,
+    target: &mut Option<WorldPoint>,
+    path: &mut Vec<WorldPoint>,
+    speed_per_tick: f32,
+    terrain: &[TerrainCell],
+    grid_size: GridSize,
+) {
+    let Some(next_target) = path.first().copied().or(*target) else {
         return;
     };
 
-    let dx = target.x - unit.position.x;
-    let dy = target.y - unit.position.y;
+    let dx = next_target.x - position.x;
+    let dy = next_target.y - position.y;
     let distance = dx.hypot(dy);
 
-    if distance <= WORKER_SPEED_PER_TICK {
-        if is_point_blocked(target, terrain, grid_size) {
-            clear_unit_order(unit);
+    if distance <= speed_per_tick {
+        if is_point_blocked(next_target, terrain, grid_size) {
+            clear_order(target, path);
             return;
         }
 
-        unit.position = target;
-        complete_current_waypoint(unit);
+        *position = next_target;
+        complete_current_waypoint(target, path);
         return;
     }
 
-    let scale = WORKER_SPEED_PER_TICK / distance;
-    let next_position = WorldPoint::new(unit.position.x + dx * scale, unit.position.y + dy * scale);
+    let scale = speed_per_tick / distance;
+    let next_position = WorldPoint::new(position.x + dx * scale, position.y + dy * scale);
     if is_point_blocked(next_position, terrain, grid_size) {
-        clear_unit_order(unit);
+        clear_order(target, path);
         return;
     }
 
-    unit.position = next_position;
+    *position = next_position;
 }
 
-fn complete_current_waypoint(unit: &mut Unit) {
-    if !unit.path.is_empty() {
-        unit.path.remove(0);
+fn complete_current_waypoint(target: &mut Option<WorldPoint>, path: &mut Vec<WorldPoint>) {
+    if !path.is_empty() {
+        path.remove(0);
     }
 
-    if unit.path.is_empty() {
-        unit.target = None;
+    if path.is_empty() {
+        *target = None;
     }
 }
 
-fn clear_unit_order(unit: &mut Unit) {
-    unit.target = None;
-    unit.path.clear();
+fn clear_order(target: &mut Option<WorldPoint>, path: &mut Vec<WorldPoint>) {
+    *target = None;
+    path.clear();
 }
 
 fn find_path(
@@ -701,6 +834,30 @@ fn neighbor_coord(
 
 fn grid_cell_center(coord: GridCoord) -> WorldPoint {
     WorldPoint::new(f32::from(coord.x) + 0.5, f32::from(coord.y) + 0.5)
+}
+
+fn horde_spawn_position(index: usize, grid_size: GridSize) -> WorldPoint {
+    let lap = index / 4;
+    match index % 4 {
+        0 => WorldPoint::new(0.5, edge_lane(lap, grid_size.height)),
+        1 => WorldPoint::new(edge_max(grid_size.width), edge_lane(lap, grid_size.height)),
+        2 => WorldPoint::new(edge_lane(lap, grid_size.width), 0.5),
+        _ => WorldPoint::new(edge_lane(lap, grid_size.width), edge_max(grid_size.height)),
+    }
+}
+
+fn edge_lane(lap: usize, length: u16) -> f32 {
+    if length <= 2 {
+        return 0.5;
+    }
+
+    let inner_length = usize::from(length) - 2;
+    let lane = 1 + (lap * 3) % inner_length;
+    f32::from(u16::try_from(lane).unwrap_or(1)) + 0.5
+}
+
+fn edge_max(length: u16) -> f32 {
+    (f32::from(length) - 0.5).max(0.5)
 }
 
 fn straight_path_is_clear(
@@ -970,6 +1127,46 @@ mod tests {
     }
 
     #[test]
+    fn horde_spawns_from_map_edges_and_targets_command_center() {
+        let mut world = GameWorld::new(SimConfig::new(32, 24), 7);
+
+        world.spawn_horde(8);
+
+        assert_eq!(world.enemies().len(), 8);
+        for enemy in world.enemies() {
+            assert!(is_edge_position(enemy.position, world.grid_size()));
+            assert_eq!(enemy.target, Some(WorldPoint::new(16.5, 12.5)));
+        }
+    }
+
+    #[test]
+    fn horde_moves_toward_command_center_on_fixed_tick() {
+        let mut world = GameWorld::new(SimConfig::new(32, 24), 7);
+        world.spawn_horde(1);
+        let enemy_id = world.enemies()[0].id;
+        let target = world.enemies()[0].target.expect("enemy should have target");
+        let start = world.enemies()[0].position;
+
+        world.step(3);
+
+        let enemy = world.enemy(enemy_id).expect("enemy should still exist");
+        assert!(distance(enemy.position, target) < distance(start, target));
+    }
+
+    #[test]
+    fn horde_simulation_is_deterministic() {
+        let mut first = GameWorld::new(SimConfig::new(32, 24), 7);
+        let mut second = GameWorld::new(SimConfig::new(32, 24), 7);
+
+        first.spawn_horde(32);
+        second.spawn_horde(32);
+        first.step(8);
+        second.step(8);
+
+        assert_eq!(first.history_hash(), second.history_hash());
+    }
+
+    #[test]
     fn rejected_command_does_not_mutate_state() {
         let mut world = GameWorld::new(SimConfig::new(32, 24), 7);
         let before = world.history_hash();
@@ -1046,5 +1243,16 @@ mod tests {
             assert!(unit.position.x < f32::from(first.grid_size().width));
             assert!(unit.position.y < f32::from(first.grid_size().height));
         }
+    }
+
+    fn is_edge_position(position: WorldPoint, grid_size: GridSize) -> bool {
+        position.x < 1.0
+            || position.y < 1.0
+            || position.x > f32::from(grid_size.width) - 1.0
+            || position.y > f32::from(grid_size.height) - 1.0
+    }
+
+    fn distance(first: WorldPoint, second: WorldPoint) -> f32 {
+        (first.x - second.x).hypot(first.y - second.y)
     }
 }
