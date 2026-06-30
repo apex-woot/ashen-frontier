@@ -7,20 +7,6 @@ const GROUP_MOVE_SPACING: f32 = 0.8;
 const PATH_NEIGHBORS: [(i16, i16); 4] = [(1, 0), (0, 1), (-1, 0), (0, -1)];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct SimConfig {
-    pub grid_size: GridSize,
-}
-
-impl SimConfig {
-    #[must_use]
-    pub const fn new(width: u16, height: u16) -> Self {
-        Self {
-            grid_size: GridSize::new(width, height),
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct GridSize {
     pub width: u16,
     pub height: u16,
@@ -107,39 +93,12 @@ impl UnitId {
     pub const fn new(value: u32) -> Self {
         Self(value)
     }
-
-    #[must_use]
-    pub const fn value(self) -> u32 {
-        self.0
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct BuildingId(u32);
-
-impl BuildingId {
-    #[must_use]
-    pub const fn new(value: u32) -> Self {
-        Self(value)
-    }
-
-    #[must_use]
-    pub const fn value(self) -> u32 {
-        self.0
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum UnitKind {
-    Worker,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Unit {
     pub id: UnitId,
-    pub kind: UnitKind,
     pub position: WorldPoint,
-    pub target: Option<WorldPoint>,
     path: Vec<WorldPoint>,
 }
 
@@ -151,51 +110,18 @@ impl EnemyId {
     pub const fn new(value: u32) -> Self {
         Self(value)
     }
-
-    #[must_use]
-    pub const fn value(self) -> u32 {
-        self.0
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum EnemyKind {
-    Grunt,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Enemy {
     pub id: EnemyId,
-    pub kind: EnemyKind,
     pub position: WorldPoint,
-    pub target: Option<WorldPoint>,
     path: Vec<WorldPoint>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum BuildingKind {
-    CommandCenter,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Building {
-    pub id: BuildingId,
-    pub kind: BuildingKind,
     pub position: GridCoord,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum Command {
-    MoveUnits {
-        units: Vec<UnitId>,
-        destination: WorldPoint,
-    },
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum CommandResult {
-    Accepted,
-    Rejected(CommandRejection),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -207,10 +133,9 @@ pub enum CommandRejection {
     UnknownUnit(UnitId),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct GameWorld {
-    config: SimConfig,
-    seed: u64,
+    grid_size: GridSize,
     tick: u64,
     units: Vec<Unit>,
     enemies: Vec<Enemy>,
@@ -221,21 +146,16 @@ pub struct GameWorld {
 
 impl GameWorld {
     #[must_use]
-    pub fn new(config: SimConfig, seed: u64) -> Self {
-        let center = GridCoord::new(config.grid_size.width / 2, config.grid_size.height / 2);
+    pub fn new(grid_size: GridSize) -> Self {
+        let center = GridCoord::new(grid_size.width / 2, grid_size.height / 2);
         let mut world = Self {
-            config,
-            seed,
+            grid_size,
             tick: 0,
             units: Vec::with_capacity(STARTING_WORKERS),
             enemies: Vec::new(),
             next_enemy_id: 1,
-            buildings: vec![Building {
-                id: BuildingId::new(1),
-                kind: BuildingKind::CommandCenter,
-                position: center,
-            }],
-            terrain: vec![TerrainCell::Clear; config.grid_size.cell_count()],
+            buildings: vec![Building { position: center }],
+            terrain: vec![TerrainCell::Clear; grid_size.cell_count()],
         };
 
         world.spawn_starting_workers(center);
@@ -244,7 +164,7 @@ impl GameWorld {
 
     #[must_use]
     pub const fn grid_size(&self) -> GridSize {
-        self.config.grid_size
+        self.grid_size
     }
 
     #[must_use]
@@ -304,10 +224,9 @@ impl GameWorld {
         point: WorldPoint,
         terrain: TerrainCell,
     ) -> Result<(), TerrainError> {
-        let coord = self.world_point_to_grid(point).unwrap_or(GridCoord::new(
-            self.config.grid_size.width,
-            self.config.grid_size.height,
-        ));
+        let coord = self
+            .world_point_to_grid(point)
+            .unwrap_or(GridCoord::new(self.grid_size.width, self.grid_size.height));
         self.set_terrain(coord, terrain)
     }
 
@@ -319,29 +238,30 @@ impl GameWorld {
             .count()
     }
 
-    #[must_use]
-    pub fn blocked_cells(&self) -> Vec<GridCoord> {
-        self.terrain
-            .iter()
-            .enumerate()
-            .filter_map(|(index, cell)| {
-                if *cell == TerrainCell::Blocked {
-                    self.grid_coord_from_index(index)
-                } else {
-                    None
-                }
-            })
-            .collect()
+    pub fn blocked_cells(&self) -> impl Iterator<Item = GridCoord> + '_ {
+        self.terrain.iter().enumerate().filter_map(|(index, cell)| {
+            if *cell == TerrainCell::Blocked {
+                self.grid_coord_from_index(index)
+            } else {
+                None
+            }
+        })
     }
 
     #[must_use]
     pub fn unit(&self, id: UnitId) -> Option<&Unit> {
-        self.units.iter().find(|unit| unit.id == id)
+        let index =
+            id.0.checked_sub(1)
+                .and_then(|value| usize::try_from(value).ok())?;
+        self.units.get(index).filter(|unit| unit.id == id)
     }
 
     #[must_use]
     pub fn enemy(&self, id: EnemyId) -> Option<&Enemy> {
-        self.enemies.iter().find(|enemy| enemy.id == id)
+        let index =
+            id.0.checked_sub(1)
+                .and_then(|value| usize::try_from(value).ok())?;
+        self.enemies.get(index).filter(|enemy| enemy.id == id)
     }
 
     #[must_use]
@@ -353,58 +273,50 @@ impl GameWorld {
             .collect()
     }
 
-    pub fn submit_command(&mut self, command: Command) -> CommandResult {
-        match command {
-            Command::MoveUnits { units, destination } => {
-                if units.is_empty() {
-                    return CommandResult::Rejected(CommandRejection::EmptySelection);
-                }
-
-                if !self.contains_world_point(destination) {
-                    return CommandResult::Rejected(CommandRejection::DestinationOutOfBounds);
-                }
-
-                if self.is_world_point_blocked(destination) {
-                    return CommandResult::Rejected(CommandRejection::BlockedDestination);
-                }
-
-                if let Some(unknown_id) = units.iter().copied().find(|id| self.unit(*id).is_none())
-                {
-                    return CommandResult::Rejected(CommandRejection::UnknownUnit(unknown_id));
-                }
-
-                let unit_count = units.len();
-                let mut orders = Vec::with_capacity(unit_count);
-                for (index, unit_id) in units.iter().copied().enumerate() {
-                    let target = group_move_target(
-                        index,
-                        unit_count,
-                        destination,
-                        self.config.grid_size,
-                        GROUP_MOVE_SPACING,
-                    );
-                    let Some(unit) = self.unit(unit_id) else {
-                        return CommandResult::Rejected(CommandRejection::UnknownUnit(unit_id));
-                    };
-                    let Some(path) =
-                        find_path(unit.position, target, &self.terrain, self.config.grid_size)
-                    else {
-                        return CommandResult::Rejected(CommandRejection::NoPath);
-                    };
-                    orders.push((unit_id, target, path));
-                }
-
-                for (unit_id, target, path) in orders {
-                    let Some(unit) = self.units.iter_mut().find(|unit| unit.id == unit_id) else {
-                        return CommandResult::Rejected(CommandRejection::UnknownUnit(unit_id));
-                    };
-                    unit.target = Some(target);
-                    unit.path = path;
-                }
-
-                CommandResult::Accepted
-            }
+    pub fn move_units(
+        &mut self,
+        units: &[UnitId],
+        destination: WorldPoint,
+    ) -> Result<(), CommandRejection> {
+        if units.is_empty() {
+            return Err(CommandRejection::EmptySelection);
         }
+
+        if !self.contains_world_point(destination) {
+            return Err(CommandRejection::DestinationOutOfBounds);
+        }
+
+        if self.is_world_point_blocked(destination) {
+            return Err(CommandRejection::BlockedDestination);
+        }
+
+        let unit_count = units.len();
+        let mut orders = Vec::with_capacity(unit_count);
+        for (index, unit_id) in units.iter().copied().enumerate() {
+            let target = group_move_target(
+                index,
+                unit_count,
+                destination,
+                self.grid_size,
+                GROUP_MOVE_SPACING,
+            );
+            let Some(unit) = self.unit(unit_id) else {
+                return Err(CommandRejection::UnknownUnit(unit_id));
+            };
+            let Some(path) = find_path(unit.position, target, &self.terrain, self.grid_size) else {
+                return Err(CommandRejection::NoPath);
+            };
+            orders.push((unit_id, path));
+        }
+
+        for (unit_id, path) in orders {
+            let Some(unit) = self.unit_mut(unit_id) else {
+                return Err(CommandRejection::UnknownUnit(unit_id));
+            };
+            unit.path = path;
+        }
+
+        Ok(())
     }
 
     pub fn spawn_horde(&mut self, enemy_count: usize) {
@@ -414,19 +326,17 @@ impl GameWorld {
 
         self.enemies.reserve(enemy_count);
         for _ in 0..enemy_count {
+            let spawn_index =
+                usize::try_from(self.next_enemy_id.saturating_sub(1)).unwrap_or(usize::MAX);
             let id = EnemyId::new(self.next_enemy_id);
             self.next_enemy_id = self.next_enemy_id.saturating_add(1);
 
-            let spawn_index = usize::try_from(id.value().saturating_sub(1)).unwrap_or(usize::MAX);
-            let position = horde_spawn_position(spawn_index, self.config.grid_size);
-            let path = find_path(position, target, &self.terrain, self.config.grid_size);
-            let has_path = path.is_some();
+            let position = horde_spawn_position(spawn_index, self.grid_size);
+            let path = find_path(position, target, &self.terrain, self.grid_size);
 
             self.enemies.push(Enemy {
                 id,
-                kind: EnemyKind::Grunt,
                 position,
-                target: has_path.then_some(target),
                 path: path.unwrap_or_default(),
             });
         }
@@ -436,10 +346,10 @@ impl GameWorld {
         for _ in 0..steps {
             self.tick = self.tick.saturating_add(1);
             for unit in &mut self.units {
-                move_unit_toward_target(unit, &self.terrain, self.config.grid_size);
+                move_unit_toward_target(unit, &self.terrain, self.grid_size);
             }
             for enemy in &mut self.enemies {
-                move_enemy_toward_target(enemy, &self.terrain, self.config.grid_size);
+                move_enemy_toward_target(enemy, &self.terrain, self.grid_size);
             }
         }
     }
@@ -447,8 +357,8 @@ impl GameWorld {
     pub fn set_worker_count(&mut self, worker_count: usize) {
         self.units.clear();
 
-        let width = usize::from(self.config.grid_size.width);
-        let height = usize::from(self.config.grid_size.height);
+        let width = usize::from(self.grid_size.width);
+        let height = usize::from(self.grid_size.height);
         if width == 0 || height == 0 {
             return;
         }
@@ -466,82 +376,10 @@ impl GameWorld {
 
             self.units.push(Unit {
                 id: UnitId::new(u32::try_from(index + 1).unwrap_or(u32::MAX)),
-                kind: UnitKind::Worker,
                 position: WorldPoint::new(f32::from(x) + jitter_x, f32::from(y) + jitter_y),
-                target: None,
                 path: Vec::new(),
             });
         }
-    }
-
-    #[must_use]
-    pub fn history_hash(&self) -> u64 {
-        let mut hash = StableHasher::default();
-        hash.write_u64(self.seed);
-        hash.write_u64(self.tick);
-        hash.write_u32(u32::from(self.config.grid_size.width));
-        hash.write_u32(u32::from(self.config.grid_size.height));
-
-        for building in &self.buildings {
-            hash.write_u32(building.id.value());
-            hash.write_u32(match building.kind {
-                BuildingKind::CommandCenter => 1,
-            });
-            hash.write_u32(u32::from(building.position.x));
-            hash.write_u32(u32::from(building.position.y));
-        }
-
-        for cell in &self.terrain {
-            hash.write_u32(match cell {
-                TerrainCell::Clear => 0,
-                TerrainCell::Blocked => 1,
-            });
-        }
-
-        for unit in &self.units {
-            hash.write_u32(unit.id.value());
-            hash.write_u32(match unit.kind {
-                UnitKind::Worker => 1,
-            });
-            hash.write_f32(unit.position.x);
-            hash.write_f32(unit.position.y);
-            if let Some(target) = unit.target {
-                hash.write_u32(1);
-                hash.write_f32(target.x);
-                hash.write_f32(target.y);
-            } else {
-                hash.write_u32(0);
-            }
-            hash.write_u32(u32::try_from(unit.path.len()).unwrap_or(u32::MAX));
-            for waypoint in &unit.path {
-                hash.write_f32(waypoint.x);
-                hash.write_f32(waypoint.y);
-            }
-        }
-
-        hash.write_u32(self.next_enemy_id);
-        for enemy in &self.enemies {
-            hash.write_u32(enemy.id.value());
-            hash.write_u32(match enemy.kind {
-                EnemyKind::Grunt => 1,
-            });
-            hash.write_f32(enemy.position.x);
-            hash.write_f32(enemy.position.y);
-            if let Some(target) = enemy.target {
-                hash.write_u32(1);
-                hash.write_f32(target.x);
-                hash.write_f32(target.y);
-            } else {
-                hash.write_u32(0);
-            }
-            hash.write_u32(u32::try_from(enemy.path.len()).unwrap_or(u32::MAX));
-            for waypoint in &enemy.path {
-                hash.write_f32(waypoint.x);
-                hash.write_f32(waypoint.y);
-            }
-        }
-
-        hash.finish()
     }
 
     fn spawn_starting_workers(&mut self, center: GridCoord) {
@@ -557,12 +395,10 @@ impl GameWorld {
         for (index, (x_offset, y_offset)) in OFFSETS.into_iter().enumerate() {
             self.units.push(Unit {
                 id: UnitId::new(u32::try_from(index + 1).expect("starting worker id fits in u32")),
-                kind: UnitKind::Worker,
                 position: WorldPoint::new(
                     f32::from(center.x) + x_offset,
                     f32::from(center.y) + y_offset,
                 ),
-                target: None,
                 path: Vec::new(),
             });
         }
@@ -571,8 +407,8 @@ impl GameWorld {
     fn contains_world_point(&self, point: WorldPoint) -> bool {
         point.x >= 0.0
             && point.y >= 0.0
-            && point.x < f32::from(self.config.grid_size.width)
-            && point.y < f32::from(self.config.grid_size.height)
+            && point.x < f32::from(self.grid_size.width)
+            && point.y < f32::from(self.grid_size.height)
     }
 
     fn is_world_point_blocked(&self, point: WorldPoint) -> bool {
@@ -582,15 +418,15 @@ impl GameWorld {
     }
 
     fn world_point_to_grid(&self, point: WorldPoint) -> Option<GridCoord> {
-        world_point_to_grid(point, self.config.grid_size)
+        world_point_to_grid(point, self.grid_size)
     }
 
     fn terrain_index(&self, coord: GridCoord) -> Option<usize> {
-        terrain_index(coord, self.config.grid_size)
+        terrain_index(coord, self.grid_size)
     }
 
     fn grid_coord_from_index(&self, index: usize) -> Option<GridCoord> {
-        let width = usize::from(self.config.grid_size.width);
+        let width = usize::from(self.grid_size.width);
         if width == 0 || index >= self.terrain.len() {
             return None;
         }
@@ -602,13 +438,16 @@ impl GameWorld {
     }
 
     fn command_center_target(&self) -> Option<WorldPoint> {
-        let center = self
-            .buildings
-            .iter()
-            .find(|building| building.kind == BuildingKind::CommandCenter)?
-            .position;
+        self.buildings
+            .first()
+            .map(|building| grid_cell_center(building.position))
+    }
 
-        Some(grid_cell_center(center))
+    fn unit_mut(&mut self, id: UnitId) -> Option<&mut Unit> {
+        let index =
+            id.0.checked_sub(1)
+                .and_then(|value| usize::try_from(value).ok())?;
+        self.units.get_mut(index).filter(|unit| unit.id == id)
     }
 }
 
@@ -665,7 +504,6 @@ fn clamp_world_point(point: WorldPoint, grid_size: GridSize) -> WorldPoint {
 fn move_unit_toward_target(unit: &mut Unit, terrain: &[TerrainCell], grid_size: GridSize) {
     move_agent_toward_target(
         &mut unit.position,
-        &mut unit.target,
         &mut unit.path,
         WORKER_SPEED_PER_TICK,
         terrain,
@@ -676,7 +514,6 @@ fn move_unit_toward_target(unit: &mut Unit, terrain: &[TerrainCell], grid_size: 
 fn move_enemy_toward_target(enemy: &mut Enemy, terrain: &[TerrainCell], grid_size: GridSize) {
     move_agent_toward_target(
         &mut enemy.position,
-        &mut enemy.target,
         &mut enemy.path,
         ENEMY_SPEED_PER_TICK,
         terrain,
@@ -686,13 +523,12 @@ fn move_enemy_toward_target(enemy: &mut Enemy, terrain: &[TerrainCell], grid_siz
 
 fn move_agent_toward_target(
     position: &mut WorldPoint,
-    target: &mut Option<WorldPoint>,
     path: &mut Vec<WorldPoint>,
     speed_per_tick: f32,
     terrain: &[TerrainCell],
     grid_size: GridSize,
 ) {
-    let Some(next_target) = path.first().copied().or(*target) else {
+    let Some(next_target) = path.last().copied() else {
         return;
     };
 
@@ -702,38 +538,23 @@ fn move_agent_toward_target(
 
     if distance <= speed_per_tick {
         if is_point_blocked(next_target, terrain, grid_size) {
-            clear_order(target, path);
+            path.clear();
             return;
         }
 
         *position = next_target;
-        complete_current_waypoint(target, path);
+        path.pop();
         return;
     }
 
     let scale = speed_per_tick / distance;
     let next_position = WorldPoint::new(position.x + dx * scale, position.y + dy * scale);
     if is_point_blocked(next_position, terrain, grid_size) {
-        clear_order(target, path);
+        path.clear();
         return;
     }
 
     *position = next_position;
-}
-
-fn complete_current_waypoint(target: &mut Option<WorldPoint>, path: &mut Vec<WorldPoint>) {
-    if !path.is_empty() {
-        path.remove(0);
-    }
-
-    if path.is_empty() {
-        *target = None;
-    }
-}
-
-fn clear_order(target: &mut Option<WorldPoint>, path: &mut Vec<WorldPoint>) {
-    *target = None;
-    path.clear();
 }
 
 fn find_path(
@@ -796,15 +617,11 @@ fn find_path(
         let current_index = terrain_index(current, grid_size)?;
         current = came_from[current_index]?;
     }
-    cells.reverse();
-
-    let last_index = cells.len().saturating_sub(1);
     Some(
         cells
             .into_iter()
-            .enumerate()
-            .map(|(index, coord)| {
-                if index == last_index {
+            .map(|coord| {
+                if coord == goal {
                     destination
                 } else {
                     grid_cell_center(coord)
@@ -935,65 +752,36 @@ fn terrain_index(coord: GridCoord, grid_size: GridSize) -> Option<usize> {
     Some(usize::from(coord.y) * usize::from(grid_size.width) + usize::from(coord.x))
 }
 
-#[derive(Default)]
-struct StableHasher {
-    state: u64,
-}
-
-impl StableHasher {
-    fn write_u32(&mut self, value: u32) {
-        self.write_u64(u64::from(value));
-    }
-
-    fn write_u64(&mut self, value: u64) {
-        let mixed = value
-            .wrapping_add(0x9e37_79b9_7f4a_7c15)
-            .wrapping_add(self.state << 6)
-            .wrapping_add(self.state >> 2);
-        self.state ^= mixed;
-    }
-
-    fn write_f32(&mut self, value: f32) {
-        self.write_u32(value.to_bits());
-    }
-
-    const fn finish(self) -> u64 {
-        self.state
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    fn test_world() -> GameWorld {
+        GameWorld::new(GridSize::new(32, 24))
+    }
+
     #[test]
     fn bootstrap_world_contains_command_center_and_workers() {
-        let world = GameWorld::new(SimConfig::new(32, 24), 7);
+        let world = test_world();
 
         assert_eq!(world.grid_size(), GridSize::new(32, 24));
         assert_eq!(world.tick(), 0);
         assert_eq!(world.units().len(), 6);
         assert_eq!(world.buildings().len(), 1);
-        assert!(world.buildings().iter().any(|building| {
-            building.kind == BuildingKind::CommandCenter
-                && building.position == GridCoord::new(16, 12)
-        }));
+        assert_eq!(world.buildings()[0].position, GridCoord::new(16, 12));
     }
 
     #[test]
-    fn accepted_move_command_advances_units_on_fixed_tick() {
-        let mut world = GameWorld::new(SimConfig::new(32, 24), 7);
+    fn accepted_move_advances_units_on_fixed_tick() {
+        let mut world = test_world();
         let unit_id = world.units()[0].id;
         let start = world.units()[0].position;
 
-        let result = world.submit_command(Command::MoveUnits {
-            units: vec![unit_id],
-            destination: WorldPoint::new(start.x + 3.0, start.y),
-        });
+        let result = world.move_units(&[unit_id], WorldPoint::new(start.x + 3.0, start.y));
         world.step(1);
 
         let unit = world.unit(unit_id).expect("unit should still exist");
-        assert_eq!(result, CommandResult::Accepted);
+        assert_eq!(result, Ok(()));
         assert_eq!(world.tick(), 1);
         assert!(unit.position.x > start.x);
         assert!((unit.position.y - start.y).abs() < f32::EPSILON);
@@ -1001,7 +789,7 @@ mod tests {
 
     #[test]
     fn multi_unit_move_assigns_spaced_formation_targets() {
-        let mut world = GameWorld::new(SimConfig::new(32, 24), 7);
+        let mut world = test_world();
         let units = world
             .units()
             .iter()
@@ -1009,15 +797,17 @@ mod tests {
             .map(|unit| unit.id)
             .collect::<Vec<_>>();
 
-        let result = world.submit_command(Command::MoveUnits {
-            units: units.clone(),
-            destination: WorldPoint::new(16.0, 12.0),
-        });
+        let result = world.move_units(&units, WorldPoint::new(16.0, 12.0));
 
-        assert_eq!(result, CommandResult::Accepted);
+        assert_eq!(result, Ok(()));
         let targets = units
             .iter()
-            .map(|unit_id| world.unit(*unit_id).and_then(|unit| unit.target).unwrap())
+            .map(|unit_id| {
+                world
+                    .unit(*unit_id)
+                    .and_then(|unit| unit.path.last().copied())
+                    .unwrap()
+            })
             .collect::<Vec<_>>();
         assert_eq!(targets[0], WorldPoint::new(15.6, 11.6));
         assert_eq!(targets[1], WorldPoint::new(16.4, 11.6));
@@ -1027,7 +817,7 @@ mod tests {
 
     #[test]
     fn selection_uses_world_space_rectangle_without_bevy_types() {
-        let world = GameWorld::new(SimConfig::new(32, 24), 7);
+        let world = test_world();
 
         let selected = world.select_units(WorldRect::from_corners(
             WorldPoint::new(13.0, 9.0),
@@ -1039,7 +829,7 @@ mod tests {
 
     #[test]
     fn terrain_cells_can_be_blocked_and_counted() {
-        let mut world = GameWorld::new(SimConfig::new(32, 24), 7);
+        let mut world = test_world();
         let coord = GridCoord::new(4, 5);
 
         assert_eq!(world.terrain_at(coord), Some(TerrainCell::Clear));
@@ -1049,34 +839,28 @@ mod tests {
 
         assert_eq!(world.terrain_at(coord), Some(TerrainCell::Blocked));
         assert_eq!(world.blocked_cell_count(), 1);
+        assert_eq!(world.blocked_cells().collect::<Vec<_>>(), vec![coord]);
     }
 
     #[test]
-    fn move_command_rejects_blocked_destination_without_mutating_units() {
-        let mut world = GameWorld::new(SimConfig::new(32, 24), 7);
+    fn move_rejects_blocked_destination_without_mutating_world() {
+        let mut world = test_world();
         let unit_id = world.units()[0].id;
-        let before = world.history_hash();
 
         assert_eq!(
             world.set_terrain(GridCoord::new(18, 12), TerrainCell::Blocked),
             Ok(())
         );
-        let result = world.submit_command(Command::MoveUnits {
-            units: vec![unit_id],
-            destination: WorldPoint::new(18.2, 12.2),
-        });
+        let before = world.clone();
+        let result = world.move_units(&[unit_id], WorldPoint::new(18.2, 12.2));
 
-        assert_eq!(
-            result,
-            CommandResult::Rejected(CommandRejection::BlockedDestination)
-        );
-        assert_eq!(world.unit(unit_id).and_then(|unit| unit.target), None);
-        assert_ne!(world.history_hash(), before);
+        assert_eq!(result, Err(CommandRejection::BlockedDestination));
+        assert_eq!(world, before);
     }
 
     #[test]
     fn unit_paths_around_blocked_cell() {
-        let mut world = GameWorld::new(SimConfig::new(32, 24), 7);
+        let mut world = test_world();
         let unit_id = world.units()[0].id;
         let start = world.units()[0].position;
         let blocked = GridCoord::new(
@@ -1086,23 +870,20 @@ mod tests {
 
         assert_eq!(world.set_terrain(blocked, TerrainCell::Blocked), Ok(()));
         assert_eq!(
-            world.submit_command(Command::MoveUnits {
-                units: vec![unit_id],
-                destination: WorldPoint::new(start.x + 3.2, start.y + 0.2),
-            }),
-            CommandResult::Accepted
+            world.move_units(&[unit_id], WorldPoint::new(start.x + 3.2, start.y + 0.2)),
+            Ok(())
         );
         world.step(20);
 
         let unit = world.unit(unit_id).expect("unit should still exist");
         assert!((unit.position.x - (start.x + 3.2)).abs() < 0.01);
         assert!((unit.position.y - (start.y + 0.2)).abs() < 0.01);
-        assert_eq!(unit.target, None);
+        assert!(unit.path.is_empty());
     }
 
     #[test]
-    fn move_command_rejects_unreachable_destination_without_mutating_units() {
-        let mut world = GameWorld::new(SimConfig::new(32, 24), 7);
+    fn move_rejects_unreachable_destination_without_mutating_world() {
+        let mut world = test_world();
         let unit_id = world.units()[0].id;
         let destination = WorldPoint::new(18.2, 12.2);
 
@@ -1115,36 +896,32 @@ mod tests {
             assert_eq!(world.set_terrain(coord, TerrainCell::Blocked), Ok(()));
         }
 
-        let before = world.history_hash();
-        let result = world.submit_command(Command::MoveUnits {
-            units: vec![unit_id],
-            destination,
-        });
+        let before = world.clone();
+        let result = world.move_units(&[unit_id], destination);
 
-        assert_eq!(result, CommandResult::Rejected(CommandRejection::NoPath));
-        assert_eq!(world.unit(unit_id).and_then(|unit| unit.target), None);
-        assert_eq!(world.history_hash(), before);
+        assert_eq!(result, Err(CommandRejection::NoPath));
+        assert_eq!(world, before);
     }
 
     #[test]
-    fn horde_spawns_from_map_edges_and_targets_command_center() {
-        let mut world = GameWorld::new(SimConfig::new(32, 24), 7);
+    fn horde_spawns_from_map_edges_and_paths_to_command_center() {
+        let mut world = test_world();
 
         world.spawn_horde(8);
 
         assert_eq!(world.enemies().len(), 8);
         for enemy in world.enemies() {
             assert!(is_edge_position(enemy.position, world.grid_size()));
-            assert_eq!(enemy.target, Some(WorldPoint::new(16.5, 12.5)));
+            assert!(enemy.path.contains(&WorldPoint::new(16.5, 12.5)));
         }
     }
 
     #[test]
     fn horde_moves_toward_command_center_on_fixed_tick() {
-        let mut world = GameWorld::new(SimConfig::new(32, 24), 7);
+        let mut world = test_world();
         world.spawn_horde(1);
         let enemy_id = world.enemies()[0].id;
-        let target = world.enemies()[0].target.expect("enemy should have target");
+        let target = WorldPoint::new(16.5, 12.5);
         let start = world.enemies()[0].position;
 
         world.step(3);
@@ -1155,87 +932,64 @@ mod tests {
 
     #[test]
     fn horde_simulation_is_deterministic() {
-        let mut first = GameWorld::new(SimConfig::new(32, 24), 7);
-        let mut second = GameWorld::new(SimConfig::new(32, 24), 7);
+        let mut first = test_world();
+        let mut second = test_world();
 
         first.spawn_horde(32);
         second.spawn_horde(32);
         first.step(8);
         second.step(8);
 
-        assert_eq!(first.history_hash(), second.history_hash());
+        assert_eq!(first, second);
     }
 
     #[test]
     fn rejected_command_does_not_mutate_state() {
-        let mut world = GameWorld::new(SimConfig::new(32, 24), 7);
-        let before = world.history_hash();
+        let mut world = test_world();
+        let before = world.clone();
 
-        let result = world.submit_command(Command::MoveUnits {
-            units: vec![UnitId::new(404)],
-            destination: WorldPoint::new(4.0, 4.0),
-        });
+        let result = world.move_units(&[UnitId::new(404)], WorldPoint::new(4.0, 4.0));
 
-        assert_eq!(
-            result,
-            CommandResult::Rejected(CommandRejection::UnknownUnit(UnitId::new(404)))
-        );
-        assert_eq!(world.history_hash(), before);
+        assert_eq!(result, Err(CommandRejection::UnknownUnit(UnitId::new(404))));
+        assert_eq!(world, before);
     }
 
     #[test]
-    fn same_seed_and_commands_produce_same_hash() {
-        let mut first = GameWorld::new(SimConfig::new(32, 24), 7);
-        let mut second = GameWorld::new(SimConfig::new(32, 24), 7);
+    fn same_commands_produce_same_world() {
+        let mut first = test_world();
+        let mut second = test_world();
         let unit_id = first.units()[0].id;
         let destination = WorldPoint::new(18.0, 12.0);
 
         assert_eq!(unit_id, second.units()[0].id);
-        assert_eq!(
-            first.submit_command(Command::MoveUnits {
-                units: vec![unit_id],
-                destination,
-            }),
-            CommandResult::Accepted
-        );
-        assert_eq!(
-            second.submit_command(Command::MoveUnits {
-                units: vec![unit_id],
-                destination,
-            }),
-            CommandResult::Accepted
-        );
+        assert_eq!(first.move_units(&[unit_id], destination), Ok(()));
+        assert_eq!(second.move_units(&[unit_id], destination), Ok(()));
 
         first.step(4);
         second.step(4);
 
-        assert_eq!(first.history_hash(), second.history_hash());
+        assert_eq!(first, second);
     }
 
     #[test]
     fn stress_population_sets_exact_worker_count() {
-        let mut world = GameWorld::new(SimConfig::new(32, 24), 7);
+        let mut world = test_world();
 
         world.set_worker_count(1_000);
 
         assert_eq!(world.units().len(), 1_000);
-        assert!(
-            world
-                .units()
-                .iter()
-                .all(|unit| unit.kind == UnitKind::Worker)
-        );
+        assert_eq!(world.unit(UnitId::new(1_000)), world.units().last());
     }
 
     #[test]
     fn stress_population_is_deterministic_and_in_bounds() {
-        let mut first = GameWorld::new(SimConfig::new(32, 24), 7);
-        let mut second = GameWorld::new(SimConfig::new(32, 24), 7);
+        let mut first = test_world();
+        let mut second = test_world();
 
         first.set_worker_count(5_000);
         second.set_worker_count(5_000);
 
-        assert_eq!(first.history_hash(), second.history_hash());
+        assert_eq!(first, second);
         for (index, unit) in first.units().iter().enumerate() {
             assert_eq!(unit.id, UnitId::new(u32::try_from(index + 1).unwrap()));
             assert!(unit.position.x >= 0.0);
