@@ -221,6 +221,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "ashen-frontier"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+]
+
+[[package]]
 name = "assert_type_match"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2597,18 +2604,6 @@ dependencies = [
  "pin-project-lite",
  "slab",
 ]
-
-[[package]]
-name = "game_app"
-version = "0.1.0"
-dependencies = [
- "bevy",
- "game_sim",
-]
-
-[[package]]
-name = "game_sim"
-version = "0.1.0"
 
 [[package]]
 name = "gethostname"
