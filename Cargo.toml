@@ -5,6 +5,9 @@ edition = "2024"
 license = "UNLICENSED"
 rust-version = "1.96"
 
+[workspace]
+members = ["xtask"]
+
 [lib]
 crate-type = ["rlib", "staticlib"]
 

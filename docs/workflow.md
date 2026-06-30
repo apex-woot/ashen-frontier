@@ -16,11 +16,13 @@ Run tests first when you change simulation code, then run the app to verify rend
 
 ## Apple shell cycle
 
-1. Build the Rust static library:
+1. Regenerate the Swift bridge header:
+   - `./apple/macos/generate-headers.sh`
+2. Build the Rust static library:
    - `./apple/macos/build-rust.sh`
-2. Build the Swift/Metal shell:
+3. Build the Swift/Metal shell:
    - `cd apple/macos && swift build`
-3. Run the Swift/Metal shell:
+4. Run the Swift/Metal shell:
    - `cd apple/macos && swift run AshenFrontierMac`
 
 Open `apple/macos/Package.swift` in Xcode for IDE work.
@@ -29,6 +31,7 @@ Open `apple/macos/Package.swift` in Xcode for IDE work.
 
 - `src/sim.rs`: gameplay source of truth.
 - `src/ffi.rs`: C ABI wrapper for Swift and later native shells.
+- `cbindgen.toml`: Rust-to-C-header generation config for the Apple bridge.
 - `src/main.rs`: Bevy shell and platform-specific glue.
 - `apple/macos`: macOS Swift/Metal shell.
 

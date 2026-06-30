@@ -20,11 +20,13 @@ Right now, the visible prototype app is driven by `bevy` in `src/main.rs`, while
 - Exposes a small C ABI for Apple callers.
 - Owns the unsafe raw-pointer boundary.
 - Keeps Swift away from Rust internals by exporting flat position snapshots.
+- Feeds `cbindgen`, which generates the Swift bridge header.
 
 ### `apple/macos`
 - Swift Package that can be opened in Xcode.
 - Owns the macOS window, AppKit lifecycle, MetalKit view, and Metal renderer.
 - Links against the Rust static library built by `cargo build --release --lib`.
+- Imports the Rust ABI through a generated C header and SwiftPM module map.
 
 ## Why this split
 

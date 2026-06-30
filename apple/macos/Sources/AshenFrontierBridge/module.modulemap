@@ -1,0 +1,4 @@
+module AshenFrontierBridge {
+    header "include/ashen_frontier.h"
+    export *
+}

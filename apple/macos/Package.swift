@@ -11,10 +11,9 @@ let package = Package(
         .executable(name: "AshenFrontierMac", targets: ["AshenFrontierMac"])
     ],
     targets: [
-        .target(
+        .systemLibrary(
             name: "AshenFrontierBridge",
-            path: "Sources/AshenFrontierBridge",
-            publicHeadersPath: "include"
+            path: "Sources/AshenFrontierBridge"
         ),
         .executableTarget(
             name: "AshenFrontierMac",

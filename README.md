@@ -11,6 +11,7 @@ cargo run
 ## Run the macOS Swift/Metal shell
 
 ```sh
+./apple/macos/generate-headers.sh
 ./apple/macos/build-rust.sh
 cd apple/macos
 swift run AshenFrontierMac

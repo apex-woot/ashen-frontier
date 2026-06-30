@@ -7,6 +7,7 @@ This is the first Swift/Metal shell for the Rust simulation.
 From the repo root:
 
 ```sh
+./apple/macos/generate-headers.sh
 ./apple/macos/build-rust.sh
 cd apple/macos
 swift build
@@ -22,3 +23,5 @@ Open `apple/macos/Package.swift` in Xcode for IDE work. Select the macOS destina
 - Right click: move the selected unit through the Rust C ABI.
 
 The renderer is intentionally minimal: Swift owns the macOS window and Metal draw loop, while Rust owns the simulation state.
+
+`Sources/AshenFrontierBridge/include/ashen_frontier.h` is generated from Rust with `cbindgen`; do not edit it by hand.
