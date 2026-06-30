@@ -1,5 +1,6 @@
 #![allow(clippy::needless_pass_by_value)]
 
+use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use game_sim::{
@@ -17,14 +18,17 @@ fn main() {
             accumulator: 0.0,
         })
         .insert_resource(Selection::default())
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                title: "Ashen Frontier".to_string(),
-                resolution: (1280, 720).into(),
+        .add_plugins((
+            DefaultPlugins.set(WindowPlugin {
+                primary_window: Some(Window {
+                    title: "Ashen Frontier".to_string(),
+                    resolution: (1280, 720).into(),
+                    ..default()
+                }),
                 ..default()
             }),
-            ..default()
-        }))
+            FrameTimeDiagnosticsPlugin::default(),
+        ))
         .add_systems(Startup, setup)
         .add_systems(
             Update,
@@ -34,6 +38,7 @@ fn main() {
                 move_input,
                 tick_simulation,
                 sync_unit_visuals,
+                update_fps_text,
                 draw_world,
             ),
         )
@@ -62,9 +67,28 @@ struct UnitVisual {
 #[derive(Component)]
 struct BuildingVisual;
 
+#[derive(Component)]
+struct FpsText;
+
 fn setup(mut commands: Commands, sim: Res<SimResource>) {
     commands.spawn((Camera2d, MainCamera));
     let grid_size = sim.world.grid_size();
+
+    commands.spawn((
+        Text::new(format_fps(None)),
+        TextFont {
+            font_size: FontSize::Px(18.0),
+            ..default()
+        },
+        TextColor(Color::srgb(0.86, 0.91, 0.82)),
+        Node {
+            position_type: PositionType::Absolute,
+            left: Val::Px(12.0),
+            top: Val::Px(10.0),
+            ..default()
+        },
+        FpsText,
+    ));
 
     for building in sim.world.buildings() {
         commands.spawn((
@@ -206,6 +230,16 @@ fn sync_unit_visuals(
     }
 }
 
+fn update_fps_text(diagnostics: Res<DiagnosticsStore>, mut query: Query<&mut Text, With<FpsText>>) {
+    let fps = diagnostics
+        .get(&FrameTimeDiagnosticsPlugin::FPS)
+        .and_then(bevy::diagnostic::Diagnostic::smoothed);
+
+    for mut text in &mut query {
+        text.0 = format_fps(fps);
+    }
+}
+
 fn draw_world(mut gizmos: Gizmos, sim: Res<SimResource>, selection: Res<Selection>) {
     let grid = sim.world.grid_size();
     let width = f32::from(grid.width) * TILE_SIZE;
@@ -273,4 +307,23 @@ fn bevy_to_world_point(position: Vec2, grid_size: GridSize) -> WorldPoint {
         (position.x - TILE_SIZE / 2.0) / TILE_SIZE + f32::from(grid_size.width) / 2.0,
         (position.y - TILE_SIZE / 2.0) / TILE_SIZE + f32::from(grid_size.height) / 2.0,
     )
+}
+
+fn format_fps(fps: Option<f64>) -> String {
+    fps.map_or_else(|| "FPS: --".to_string(), |fps| format!("FPS: {fps:.1}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fps_label_formats_missing_diagnostic() {
+        assert_eq!(format_fps(None), "FPS: --");
+    }
+
+    #[test]
+    fn fps_label_formats_smoothed_value() {
+        assert_eq!(format_fps(Some(59.94)), "FPS: 59.9");
+    }
 }
