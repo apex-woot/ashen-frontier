@@ -29,6 +29,8 @@ open apple/ios/AshenFrontierIOS.xcodeproj
 
 In Xcode, choose an iPhone or iPad simulator and run the `AshenFrontierIOS` target.
 
+The iOS shell is portrait-first. The app declares portrait as its supported orientation and requires full screen on iPad so the orientation lock is honored.
+
 ## Controls
 
 - Single tap: select the nearest unit.

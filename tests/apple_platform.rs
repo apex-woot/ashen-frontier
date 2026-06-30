@@ -36,3 +36,37 @@ fn ios_simulator_project_uses_the_rust_bridge_and_metal_renderer() {
     assert!(ios_view.contains("MTKView"));
     assert!(ios_controller.contains("RustWorld(width: 32, height: 24)"));
 }
+
+#[test]
+fn ios_shell_is_portrait_first_and_maps_touch_points_into_world_space() {
+    let info_plist = include_str!("../apple/ios/AshenFrontierIOS/Info.plist");
+    let ios_view = include_str!("../apple/ios/AshenFrontierIOS/GameView.swift");
+    let ios_controller = include_str!("../apple/ios/AshenFrontierIOS/GameViewController.swift");
+
+    assert!(info_plist.contains("<key>UIRequiresFullScreen</key>"));
+    assert!(info_plist.contains("<string>UIInterfaceOrientationPortrait</string>"));
+    assert!(!info_plist.contains("UIInterfaceOrientationLandscapeLeft"));
+    assert!(!info_plist.contains("UIInterfaceOrientationLandscapeRight"));
+    assert!(ios_controller.contains("supportedInterfaceOrientations"));
+    assert!(ios_controller.contains(".portrait"));
+    assert!(ios_controller.contains("preferredInterfaceOrientationForPresentation"));
+
+    assert!(ios_view.contains("touchPointForWorld"));
+    assert!(ios_view.contains("isUserInteractionEnabled = true"));
+    assert!(ios_view.contains("isMultipleTouchEnabled = true"));
+    assert!(ios_view.contains("bounds.height - point.y"));
+    assert!(ios_view.contains("selectUnit?(touchPointForWorld"));
+    assert!(ios_view.contains("moveSelectedUnits?(touchPointForWorld"));
+}
+
+#[test]
+fn ios_shell_uses_touch_specific_controls_in_the_hud() {
+    let controller = include_str!("../apple/macos/Sources/AshenFrontierMac/GameController.swift");
+    let ios_controller = include_str!("../apple/ios/AshenFrontierIOS/GameViewController.swift");
+
+    assert!(controller.contains("controlHint"));
+    assert!(controller.contains("Controls:"));
+    assert!(ios_controller.contains("Tap=select"));
+    assert!(ios_controller.contains("Long press=move"));
+    assert!(ios_controller.contains("Two-finger=horde"));
+}

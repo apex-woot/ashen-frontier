@@ -7,13 +7,24 @@ final class GameViewController: UIViewController {
     private var displayLink: CADisplayLink?
     private let hudLabel = UILabel()
 
+    override var supportedInterfaceOrientations: UIInterfaceOrientationMask {
+        .portrait
+    }
+
+    override var preferredInterfaceOrientationForPresentation: UIInterfaceOrientation {
+        .portrait
+    }
+
     override func loadView() {
         guard let device = MTLCreateSystemDefaultDevice() else {
             fatalError("Metal is not available on this device")
         }
 
         let world = RustWorld(width: 32, height: 24)
-        let controller = GameController(world: world)
+        let controller = GameController(
+            world: world,
+            controlHint: "Tap=select  Long press=move  Two-finger=horde"
+        )
         let gameView = GameView(frame: .zero, device: device)
         gameView.colorPixelFormat = .bgra8Unorm
         gameView.clearColor = MTLClearColor(red: 0.04, green: 0.05, blue: 0.045, alpha: 1.0)

@@ -16,6 +16,9 @@ final class GameView: MTKView {
     }
 
     private func installGestures() {
+        isUserInteractionEnabled = true
+        isMultipleTouchEnabled = true
+
         let selectTap = UITapGestureRecognizer(target: self, action: #selector(handleSelectTap(_:)))
         selectTap.numberOfTouchesRequired = 1
         addGestureRecognizer(selectTap)
@@ -35,7 +38,7 @@ final class GameView: MTKView {
             return
         }
 
-        selectUnit?(recognizer.location(in: self), bounds.size)
+        selectUnit?(touchPointForWorld(from: recognizer), bounds.size)
     }
 
     @objc private func handleHordeTap(_ recognizer: UITapGestureRecognizer) {
@@ -51,6 +54,11 @@ final class GameView: MTKView {
             return
         }
 
-        moveSelectedUnits?(recognizer.location(in: self), bounds.size)
+        moveSelectedUnits?(touchPointForWorld(from: recognizer), bounds.size)
+    }
+
+    private func touchPointForWorld(from recognizer: UIGestureRecognizer) -> CGPoint {
+        let point = recognizer.location(in: self)
+        return CGPoint(x: point.x, y: bounds.height - point.y)
     }
 }

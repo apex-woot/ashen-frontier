@@ -2,3 +2,5 @@
 /apple/macos/.build/
 /apple/macos/.swiftpm/
 .DS_Store
+**/*.xcodeproj/project.xcworkspace/
+**/*.xcodeproj/xcuserdata/

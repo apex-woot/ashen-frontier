@@ -12,10 +12,12 @@ final class GameController {
     private(set) var selectedUnitIDs: Set<UInt32> = []
     private(set) var fps: Double = 0
     private(set) var lastCommandStatus: UInt32 = UInt32(AF_COMMAND_STATUS_ACCEPTED)
+    private let controlHint: String
     private var lastFrameTime: TimeInterval?
 
-    init(world: RustWorld) {
+    init(world: RustWorld, controlHint: String = "H=horde  Left=select  Right=move") {
         self.world = world
+        self.controlHint = controlHint
     }
 
     func stepFrame() {
@@ -73,7 +75,7 @@ final class GameController {
         Enemies: \(world.enemies().count)
         Selected: \(selectedUnitIDs.count)
         Command: \(commandStatusLabel(lastCommandStatus))
-        Hotkeys: H=horde  Left=select  Right=move
+        Controls: \(controlHint)
         """
     }
 
