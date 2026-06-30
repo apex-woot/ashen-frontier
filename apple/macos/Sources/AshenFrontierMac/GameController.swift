@@ -3,21 +3,26 @@ import CoreGraphics
 import Foundation
 import simd
 
-private let gridWidth: Float = 32.0
-private let gridHeight: Float = 24.0
 private let selectionRadius: Float = 0.85
-private let minCameraZoom: Float = 1.0
-private let maxCameraZoom: Float = 4.0
+private let groupSelectionRadius: Float = 2.25
+private let selectionRadiusSquared = selectionRadius * selectionRadius
+private let groupSelectionRadiusSquared = groupSelectionRadius * groupSelectionRadius
+private let minCameraZoom: Float = 0.75
+private let maxCameraZoom: Float = 24.0
+private let simulationStepInterval: TimeInterval = 1.0 / 60.0
+private let maxSimulationStepsPerFrame = 2
 
 final class GameController {
     let world: RustWorld
+    let worldSize: SIMD2<Float>
     private(set) var selectedUnitIDs: Set<UInt32> = []
     private(set) var fps: Double = 0
     private(set) var lastCommandStatus: UInt32 = UInt32(AF_COMMAND_STATUS_ACCEPTED)
     private let controlHint: String
-    private var cameraCenter = SIMD2<Float>(gridWidth * 0.5, gridHeight * 0.5)
+    private var cameraCenter: SIMD2<Float>
     private var cameraZoom: Float = 1.0
     private var lastFrameTime: TimeInterval?
+    private var simulationAccumulator: TimeInterval = 0
 
     init(
         world: RustWorld,
@@ -25,13 +30,22 @@ final class GameController {
         initialCameraZoom: Float = 1.0
     ) {
         self.world = world
+        self.worldSize = world.size
         self.controlHint = controlHint
+        self.cameraCenter = world.size * 0.5
         self.cameraZoom = min(max(initialCameraZoom, minCameraZoom), maxCameraZoom)
     }
 
     func stepFrame() {
-        updateFPS()
-        world.step(1)
+        let frameDelta = updateFPS()
+        simulationAccumulator += min(frameDelta, simulationStepInterval * TimeInterval(maxSimulationStepsPerFrame))
+
+        var stepCount = 0
+        while simulationAccumulator >= simulationStepInterval && stepCount < maxSimulationStepsPerFrame {
+            world.step(1)
+            simulationAccumulator -= simulationStepInterval
+            stepCount += 1
+        }
     }
 
     func spawnHorde() {
@@ -46,6 +60,14 @@ final class GameController {
         world.enemies()
     }
 
+    func readUnits(into positions: inout [AfEntityPosition]) -> Int {
+        world.readUnits(into: &positions)
+    }
+
+    func readEnemies(into positions: inout [AfEntityPosition]) -> Int {
+        world.readEnemies(into: &positions)
+    }
+
     func isSelected(unitID: UInt32) -> Bool {
         selectedUnitIDs.contains(unitID)
     }
@@ -53,7 +75,7 @@ final class GameController {
     func viewport(for viewSize: CGSize) -> ViewportTransform {
         ViewportTransform(
             viewSize: viewSize,
-            worldSize: SIMD2<Float>(gridWidth, gridHeight),
+            worldSize: worldSize,
             center: cameraCenter,
             zoom: cameraZoom
         )
@@ -63,16 +85,35 @@ final class GameController {
         let worldPoint = clampedWorldPosition(for: viewPoint, in: viewSize)
         let nearest = units()
             .map { unit in
-                (unit: unit, distance: hypot(unit.x - worldPoint.x, unit.y - worldPoint.y))
+                let xDelta = unit.x - worldPoint.x
+                let yDelta = unit.y - worldPoint.y
+                return (unit: unit, distanceSquared: xDelta * xDelta + yDelta * yDelta)
             }
-            .filter { $0.distance <= selectionRadius }
-            .min { $0.distance < $1.distance }
+            .filter { $0.distanceSquared <= selectionRadiusSquared }
+            .min { $0.distanceSquared < $1.distanceSquared }
 
         if let nearest {
             selectedUnitIDs = [nearest.unit.id]
         } else {
             selectedUnitIDs.removeAll()
         }
+    }
+
+    func selectUnits(near viewPoint: CGPoint, in viewSize: CGSize) {
+        let worldPoint = clampedWorldPosition(for: viewPoint, in: viewSize)
+        let selectedIDs = units()
+            .filter { unit in
+                let xDelta = unit.x - worldPoint.x
+                let yDelta = unit.y - worldPoint.y
+                return xDelta * xDelta + yDelta * yDelta <= groupSelectionRadiusSquared
+            }
+            .map(\.id)
+
+        selectedUnitIDs = Set(selectedIDs)
+    }
+
+    func selectAllUnits() {
+        selectedUnitIDs = Set(units().map(\.id))
     }
 
     func moveSelectedUnits(to viewPoint: CGPoint, in viewSize: CGSize) {
@@ -120,30 +161,31 @@ final class GameController {
         """
     }
 
-    private func updateFPS() {
+    private func updateFPS() -> TimeInterval {
         let now = Date.timeIntervalSinceReferenceDate
         defer {
             lastFrameTime = now
         }
 
         guard let lastFrameTime else {
-            return
+            return simulationStepInterval
         }
 
         let delta = now - lastFrameTime
         guard delta > 0 else {
-            return
+            return 0
         }
 
         let instantFPS = 1.0 / delta
         fps = fps == 0 ? instantFPS : fps * 0.9 + instantFPS * 0.1
+        return delta
     }
 
     private func clampedWorldPosition(for viewPoint: CGPoint, in viewSize: CGSize) -> SIMD2<Float> {
         let point = viewport(for: viewSize).viewPointToWorld(viewPoint)
         return SIMD2<Float>(
-            min(max(point.x, 0), gridWidth - Float.ulpOfOne),
-            min(max(point.y, 0), gridHeight - Float.ulpOfOne)
+            min(max(point.x, 0), worldSize.x - Float.ulpOfOne),
+            min(max(point.y, 0), worldSize.y - Float.ulpOfOne)
         )
     }
 
@@ -153,12 +195,12 @@ final class GameController {
         cameraCenter.x = clampedCameraAxis(
             center: cameraCenter.x,
             visibleLength: visible.x,
-            worldLength: gridWidth
+            worldLength: worldSize.x
         )
         cameraCenter.y = clampedCameraAxis(
             center: cameraCenter.y,
             visibleLength: visible.y,
-            worldLength: gridHeight
+            worldLength: worldSize.y
         )
     }
 }
@@ -224,6 +266,19 @@ struct ViewportTransform {
             (halfSize.x * scale / Float(viewSize.width)) * 2.0,
             (halfSize.y * scale / Float(viewSize.height)) * 2.0
         )
+    }
+
+    func isWorldRectVisible(center rectCenter: SIMD2<Float>, halfSize: SIMD2<Float>) -> Bool {
+        let visible = visibleWorldSize
+        let minVisible = center - visible * 0.5
+        let maxVisible = center + visible * 0.5
+        let minRect = rectCenter - halfSize
+        let maxRect = rectCenter + halfSize
+
+        return maxRect.x >= minVisible.x
+            && minRect.x <= maxVisible.x
+            && maxRect.y >= minVisible.y
+            && minRect.y <= maxVisible.y
     }
 }
 

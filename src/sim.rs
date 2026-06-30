@@ -4,6 +4,7 @@ const STARTING_WORKERS: usize = 6;
 const WORKER_SPEED_PER_TICK: f32 = 1.5;
 const ENEMY_SPEED_PER_TICK: f32 = 0.9;
 const GROUP_MOVE_SPACING: f32 = 0.8;
+const SPATIAL_CHUNK_SIZE: u16 = 16;
 const PATH_NEIGHBORS: [(i16, i16); 4] = [(1, 0), (0, 1), (-1, 0), (0, -1)];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -144,6 +145,193 @@ pub enum CommandRejection {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+struct SpatialIndex<Id> {
+    grid_size: GridSize,
+    chunk_size: u16,
+    chunk_columns: usize,
+    chunk_rows: usize,
+    buckets: Vec<Vec<Id>>,
+}
+
+impl<Id: Copy> SpatialIndex<Id> {
+    fn new(grid_size: GridSize, chunk_size: u16) -> Self {
+        let chunk_size = chunk_size.max(1);
+        let chunk_size_usize = usize::from(chunk_size);
+        let chunk_columns = usize::from(grid_size.width).div_ceil(chunk_size_usize);
+        let chunk_rows = usize::from(grid_size.height).div_ceil(chunk_size_usize);
+        let bucket_count = chunk_columns.saturating_mul(chunk_rows);
+
+        Self {
+            grid_size,
+            chunk_size,
+            chunk_columns,
+            chunk_rows,
+            buckets: vec![Vec::new(); bucket_count],
+        }
+    }
+
+    fn rebuild(&mut self, entities: impl IntoIterator<Item = (Id, WorldPoint)>) {
+        for bucket in &mut self.buckets {
+            bucket.clear();
+        }
+
+        for (id, position) in entities {
+            let Some(index) = self.bucket_index_for_point(position) else {
+                continue;
+            };
+            self.buckets[index].push(id);
+        }
+    }
+
+    #[must_use]
+    fn ids_in_rect(&self, rect: WorldRect) -> Vec<Id> {
+        let Some((min_x, max_x, min_y, max_y)) = self.chunk_range_for_rect(rect) else {
+            return Vec::new();
+        };
+
+        let mut ids = Vec::new();
+        for chunk_y in min_y..=max_y {
+            for chunk_x in min_x..=max_x {
+                let Some(index) = self.bucket_index_for_chunk(chunk_x, chunk_y) else {
+                    continue;
+                };
+                ids.extend(self.buckets[index].iter().copied());
+            }
+        }
+        ids
+    }
+
+    fn bucket_index_for_point(&self, point: WorldPoint) -> Option<usize> {
+        let coord = world_point_to_grid(point, self.grid_size)?;
+        let chunk_x = usize::from(coord.x) / usize::from(self.chunk_size);
+        let chunk_y = usize::from(coord.y) / usize::from(self.chunk_size);
+        self.bucket_index_for_chunk(chunk_x, chunk_y)
+    }
+
+    fn bucket_index_for_chunk(&self, chunk_x: usize, chunk_y: usize) -> Option<usize> {
+        if chunk_x >= self.chunk_columns || chunk_y >= self.chunk_rows {
+            return None;
+        }
+
+        Some(chunk_y * self.chunk_columns + chunk_x)
+    }
+
+    fn chunk_range_for_rect(&self, rect: WorldRect) -> Option<(usize, usize, usize, usize)> {
+        let (min_cell_x, max_cell_x) =
+            clamped_cell_range(rect.min.x, rect.max.x, self.grid_size.width)?;
+        let (min_cell_y, max_cell_y) =
+            clamped_cell_range(rect.min.y, rect.max.y, self.grid_size.height)?;
+        let chunk_size = usize::from(self.chunk_size);
+
+        Some((
+            usize::from(min_cell_x) / chunk_size,
+            usize::from(max_cell_x) / chunk_size,
+            usize::from(min_cell_y) / chunk_size,
+            usize::from(max_cell_y) / chunk_size,
+        ))
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct FlowField {
+    grid_size: GridSize,
+    destination: GridCoord,
+    next_steps: Vec<Option<GridCoord>>,
+}
+
+impl FlowField {
+    fn build(
+        destination: WorldPoint,
+        terrain: &[TerrainCell],
+        grid_size: GridSize,
+    ) -> Option<Self> {
+        let destination_coord = world_point_to_grid(destination, grid_size)?;
+        if is_coord_blocked(destination_coord, terrain, grid_size) {
+            return None;
+        }
+
+        let destination_index = terrain_index(destination_coord, grid_size)?;
+        let mut next_steps = vec![None; grid_size.cell_count()];
+        let mut frontier = VecDeque::from([destination_coord]);
+        next_steps[destination_index] = Some(destination_coord);
+
+        while let Some(current) = frontier.pop_front() {
+            for (x_delta, y_delta) in PATH_NEIGHBORS {
+                let Some(neighbor) = neighbor_coord(current, x_delta, y_delta, grid_size) else {
+                    continue;
+                };
+                if is_coord_blocked(neighbor, terrain, grid_size) {
+                    continue;
+                }
+
+                let neighbor_index = terrain_index(neighbor, grid_size)?;
+                if next_steps[neighbor_index].is_some() {
+                    continue;
+                }
+
+                next_steps[neighbor_index] = Some(current);
+                frontier.push_back(neighbor);
+            }
+        }
+
+        Some(Self {
+            grid_size,
+            destination: destination_coord,
+            next_steps,
+        })
+    }
+
+    fn path_from(
+        &self,
+        start: WorldPoint,
+        destination: WorldPoint,
+        terrain: &[TerrainCell],
+    ) -> Option<Vec<WorldPoint>> {
+        let start_coord = world_point_to_grid(start, self.grid_size)?;
+        if is_coord_blocked(start_coord, terrain, self.grid_size) {
+            return None;
+        }
+
+        if start_coord == self.destination {
+            return Some(vec![destination]);
+        }
+
+        if straight_path_is_clear(start, destination, terrain, self.grid_size) {
+            return Some(vec![destination]);
+        }
+
+        let mut current = start_coord;
+        let mut path = Vec::new();
+        for _ in 0..self.grid_size.cell_count() {
+            let current_index = terrain_index(current, self.grid_size)?;
+            let next = self.next_steps[current_index]?;
+
+            if next == current {
+                break;
+            }
+
+            path.push(if next == self.destination {
+                destination
+            } else {
+                grid_cell_center(next)
+            });
+            current = next;
+
+            if current == self.destination {
+                break;
+            }
+        }
+
+        if current != self.destination {
+            return None;
+        }
+
+        path.reverse();
+        Some(path)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct GameWorld {
     grid_size: GridSize,
     tick: u64,
@@ -152,6 +340,7 @@ pub struct GameWorld {
     next_enemy_id: u32,
     buildings: Vec<Building>,
     terrain: Vec<TerrainCell>,
+    unit_chunks: SpatialIndex<UnitId>,
 }
 
 impl GameWorld {
@@ -166,9 +355,11 @@ impl GameWorld {
             next_enemy_id: 1,
             buildings: vec![Building { position: center }],
             terrain: vec![TerrainCell::Clear; grid_size.cell_count()],
+            unit_chunks: SpatialIndex::new(grid_size, SPATIAL_CHUNK_SIZE),
         };
 
         world.spawn_starting_workers(center);
+        world.rebuild_unit_spatial_index();
         world
     }
 
@@ -276,10 +467,13 @@ impl GameWorld {
 
     #[must_use]
     pub fn select_units(&self, rect: WorldRect) -> Vec<UnitId> {
-        self.units
-            .iter()
-            .filter(|unit| rect.contains(unit.position))
-            .map(|unit| unit.id)
+        self.unit_chunks
+            .ids_in_rect(rect)
+            .into_iter()
+            .filter(|unit_id| {
+                self.unit(*unit_id)
+                    .is_some_and(|unit| rect.contains(unit.position))
+            })
             .collect()
     }
 
@@ -307,7 +501,9 @@ impl GameWorld {
         }
 
         let unit_count = units.len();
-        let mut orders = Vec::with_capacity(unit_count);
+        let flow_field = FlowField::build(destination, &self.terrain, self.grid_size)
+            .ok_or(CommandRejection::NoPath)?;
+        let mut selected_units = Vec::with_capacity(unit_count);
         for (index, unit_id) in units.iter().copied().enumerate() {
             let target = group_move_target(
                 index,
@@ -319,9 +515,22 @@ impl GameWorld {
             let Some(unit) = self.unit(unit_id) else {
                 return Err(CommandRejection::UnknownUnit(unit_id));
             };
-            let Some(path) = find_path(unit.position, target, &self.terrain, self.grid_size) else {
+            selected_units.push((unit_id, unit.position, target));
+        }
+
+        let mut orders = Vec::with_capacity(unit_count);
+        for (unit_id, position, target) in selected_units {
+            let Some(mut path) = flow_field.path_from(position, destination, &self.terrain) else {
                 return Err(CommandRejection::NoPath);
             };
+            append_formation_target(
+                &mut path,
+                destination,
+                target,
+                &self.terrain,
+                self.grid_size,
+            )
+            .ok_or(CommandRejection::NoPath)?;
             orders.push((unit_id, path));
         }
 
@@ -367,6 +576,7 @@ impl GameWorld {
             for enemy in &mut self.enemies {
                 move_enemy_toward_target(enemy, &self.terrain, self.grid_size);
             }
+            self.rebuild_unit_spatial_index();
         }
     }
 
@@ -396,6 +606,7 @@ impl GameWorld {
                 path: Vec::new(),
             });
         }
+        self.rebuild_unit_spatial_index();
     }
 
     fn spawn_starting_workers(&mut self, center: GridCoord) {
@@ -465,6 +676,11 @@ impl GameWorld {
                 .and_then(|value| usize::try_from(value).ok())?;
         self.units.get_mut(index).filter(|unit| unit.id == id)
     }
+
+    fn rebuild_unit_spatial_index(&mut self) {
+        self.unit_chunks
+            .rebuild(self.units.iter().map(|unit| (unit.id, unit.position)));
+    }
 }
 
 fn stress_jitter(slot: usize) -> f32 {
@@ -517,6 +733,27 @@ fn clamp_world_point(point: WorldPoint, grid_size: GridSize) -> WorldPoint {
     WorldPoint::new(point.x.clamp(0.0, max_x), point.y.clamp(0.0, max_y))
 }
 
+fn append_formation_target(
+    path: &mut Vec<WorldPoint>,
+    destination: WorldPoint,
+    target: WorldPoint,
+    terrain: &[TerrainCell],
+    grid_size: GridSize,
+) -> Option<()> {
+    if target == destination {
+        return Some(());
+    }
+
+    if is_point_blocked(target, terrain, grid_size)
+        || !straight_path_is_clear(destination, target, terrain, grid_size)
+    {
+        return None;
+    }
+
+    path.insert(0, target);
+    Some(())
+}
+
 fn move_unit_toward_target(unit: &mut Unit, terrain: &[TerrainCell], grid_size: GridSize) {
     move_agent_toward_target(
         &mut unit.position,
@@ -550,7 +787,7 @@ fn move_agent_toward_target(
 
     let dx = next_target.x - position.x;
     let dy = next_target.y - position.y;
-    let distance = dx.hypot(dy);
+    let distance = world_distance(dx, dy);
 
     if distance <= speed_per_tick {
         if is_point_blocked(next_target, terrain, grid_size) {
@@ -573,78 +810,18 @@ fn move_agent_toward_target(
     *position = next_position;
 }
 
+fn world_distance(x_delta: f32, y_delta: f32) -> f32 {
+    x_delta.mul_add(x_delta, y_delta * y_delta).sqrt()
+}
+
 fn find_path(
     start: WorldPoint,
     destination: WorldPoint,
     terrain: &[TerrainCell],
     grid_size: GridSize,
 ) -> Option<Vec<WorldPoint>> {
-    let start_point = start;
-    let start = world_point_to_grid(start, grid_size)?;
-    let goal = world_point_to_grid(destination, grid_size)?;
-
-    if is_coord_blocked(goal, terrain, grid_size) {
-        return None;
-    }
-
-    if start == goal {
-        return Some(vec![destination]);
-    }
-
-    if straight_path_is_clear(start_point, destination, terrain, grid_size) {
-        return Some(vec![destination]);
-    }
-
-    let start_index = terrain_index(start, grid_size)?;
-    let goal_index = terrain_index(goal, grid_size)?;
-    let mut frontier = VecDeque::from([start]);
-    let mut came_from = vec![None; grid_size.cell_count()];
-    came_from[start_index] = Some(start);
-
-    while let Some(current) = frontier.pop_front() {
-        if current == goal {
-            break;
-        }
-
-        for (x_delta, y_delta) in PATH_NEIGHBORS {
-            let Some(neighbor) = neighbor_coord(current, x_delta, y_delta, grid_size) else {
-                continue;
-            };
-            if is_coord_blocked(neighbor, terrain, grid_size) {
-                continue;
-            }
-
-            let neighbor_index = terrain_index(neighbor, grid_size)?;
-            if came_from[neighbor_index].is_some() {
-                continue;
-            }
-
-            came_from[neighbor_index] = Some(current);
-            frontier.push_back(neighbor);
-        }
-    }
-
-    came_from[goal_index]?;
-
-    let mut cells = Vec::new();
-    let mut current = goal;
-    while current != start {
-        cells.push(current);
-        let current_index = terrain_index(current, grid_size)?;
-        current = came_from[current_index]?;
-    }
-    Some(
-        cells
-            .into_iter()
-            .map(|coord| {
-                if coord == goal {
-                    destination
-                } else {
-                    grid_cell_center(coord)
-                }
-            })
-            .collect(),
-    )
+    let flow_field = FlowField::build(destination, terrain, grid_size)?;
+    flow_field.path_from(start, destination, terrain)
 }
 
 fn neighbor_coord(
@@ -749,6 +926,18 @@ fn world_point_to_grid(point: WorldPoint, grid_size: GridSize) -> Option<GridCoo
     ))
 }
 
+fn clamped_cell_range(min: f32, max: f32, limit: u16) -> Option<(u16, u16)> {
+    if limit == 0 || max < 0.0 || min >= f32::from(limit) {
+        return None;
+    }
+
+    let max_cell = limit.saturating_sub(1);
+    let min_cell = bounded_floor_to_u16(min.max(0.0)).min(max_cell);
+    let max_cell = bounded_floor_to_u16(max.min(f32::from(max_cell))).min(max_cell);
+
+    Some((min_cell, max_cell))
+}
+
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 fn bounded_floor_to_u16(value: f32) -> u16 {
     let floored = value.floor();
@@ -816,19 +1005,33 @@ mod tests {
         let result = world.move_units(&units, WorldPoint::new(16.0, 12.0));
 
         assert_eq!(result, Ok(()));
-        let targets = units
+        let destination = WorldPoint::new(16.0, 12.0);
+        let paths = units
             .iter()
-            .map(|unit_id| {
-                world
-                    .unit(*unit_id)
-                    .and_then(|unit| unit.path.last().copied())
-                    .unwrap()
-            })
+            .map(|unit_id| world.unit(*unit_id).map(|unit| unit.path.clone()).unwrap())
             .collect::<Vec<_>>();
-        assert_eq!(targets[0], WorldPoint::new(15.6, 11.6));
-        assert_eq!(targets[1], WorldPoint::new(16.4, 11.6));
-        assert_eq!(targets[2], WorldPoint::new(15.6, 12.4));
-        assert_eq!(targets[3], WorldPoint::new(16.4, 12.4));
+        assert_eq!(paths[0].first().copied(), Some(WorldPoint::new(15.6, 11.6)));
+        assert_eq!(paths[1].first().copied(), Some(WorldPoint::new(16.4, 11.6)));
+        assert_eq!(paths[2].first().copied(), Some(WorldPoint::new(15.6, 12.4)));
+        assert_eq!(paths[3].first().copied(), Some(WorldPoint::new(16.4, 12.4)));
+        for path in paths {
+            assert!(path.contains(&destination));
+        }
+    }
+
+    #[test]
+    fn selection_uses_spatial_chunks_to_reduce_candidate_units() {
+        let mut world = test_world();
+        world.set_worker_count(5_000);
+        let rect =
+            WorldRect::from_corners(WorldPoint::new(10.0, 10.0), WorldPoint::new(12.0, 12.0));
+
+        let candidates = world.unit_chunks.ids_in_rect(rect);
+        let selected = world.select_units(rect);
+
+        assert!(!selected.is_empty());
+        assert!(candidates.len() < world.units().len());
+        assert!(selected.iter().all(|unit_id| candidates.contains(unit_id)));
     }
 
     #[test]
@@ -1023,6 +1226,6 @@ mod tests {
     }
 
     fn distance(first: WorldPoint, second: WorldPoint) -> f32 {
-        (first.x - second.x).hypot(first.y - second.y)
+        world_distance(first.x - second.x, first.y - second.y)
     }
 }
