@@ -6,7 +6,8 @@ use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use bevy::prelude::*;
 use bevy::window::{PresentMode, PrimaryWindow};
 use game_sim::{
-    Command, CommandResult, GameWorld, GridSize, SimConfig, Unit, UnitId, WorldPoint, WorldRect,
+    Command, CommandResult, GameWorld, GridSize, SimConfig, TerrainCell, Unit, UnitId, WorldPoint,
+    WorldRect,
 };
 
 const GRID_WIDTH: u16 = 32;
@@ -29,6 +30,7 @@ fn main() {
         })
         .insert_resource(Selection::default())
         .insert_resource(DragSelection::default())
+        .insert_resource(InteractionState::default())
         .add_plugins((
             DefaultPlugins.set(WindowPlugin {
                 primary_window: Some(Window {
@@ -46,6 +48,8 @@ fn main() {
             Update,
             (
                 camera_controls,
+                toggle_interaction_mode,
+                paint_terrain_input,
                 selection_input,
                 move_input,
                 apply_stress_hotkeys,
@@ -78,6 +82,27 @@ struct DragSelection {
     current_screen: Option<Vec2>,
 }
 
+#[derive(Resource, Default)]
+struct InteractionState {
+    mode: InteractionMode,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum InteractionMode {
+    #[default]
+    Select,
+    PaintBlocked,
+}
+
+impl InteractionMode {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Select => "select",
+            Self::PaintBlocked => "paint blocked",
+        }
+    }
+}
+
 #[derive(Component)]
 struct MainCamera;
 
@@ -98,6 +123,8 @@ struct HudStats {
     unit_count: usize,
     selected_count: usize,
     tick: u64,
+    blocked_cell_count: usize,
+    mode: InteractionMode,
 }
 
 fn setup(mut commands: Commands, sim: Res<SimResource>) {
@@ -110,6 +137,8 @@ fn setup(mut commands: Commands, sim: Res<SimResource>) {
             unit_count: sim.world.units().len(),
             selected_count: 0,
             tick: sim.world.tick(),
+            blocked_cell_count: sim.world.blocked_cell_count(),
+            mode: InteractionMode::Select,
         })),
         TextFont {
             font_size: FontSize::Px(18.0),
@@ -184,14 +213,53 @@ fn camera_controls(
     }
 }
 
+fn toggle_interaction_mode(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut interaction: ResMut<InteractionState>,
+) {
+    if !keys.just_pressed(KeyCode::KeyB) {
+        return;
+    }
+
+    interaction.mode = match interaction.mode {
+        InteractionMode::Select => InteractionMode::PaintBlocked,
+        InteractionMode::PaintBlocked => InteractionMode::Select,
+    };
+}
+
+fn paint_terrain_input(
+    buttons: Res<ButtonInput<MouseButton>>,
+    windows: Query<&Window, With<PrimaryWindow>>,
+    camera: Query<(&Camera, &GlobalTransform), With<MainCamera>>,
+    interaction: Res<InteractionState>,
+    mut sim: ResMut<SimResource>,
+) {
+    if interaction.mode != InteractionMode::PaintBlocked || !buttons.pressed(MouseButton::Left) {
+        return;
+    }
+
+    let Some(world_position) = cursor_world_position(&windows, &camera) else {
+        return;
+    };
+    let sim_position = bevy_to_world_point(world_position, sim.world.grid_size());
+    let _ = sim
+        .world
+        .set_terrain_at_point(sim_position, TerrainCell::Blocked);
+}
+
 fn selection_input(
     buttons: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window, With<PrimaryWindow>>,
     camera: Query<(&Camera, &GlobalTransform), With<MainCamera>>,
     sim: Res<SimResource>,
+    interaction: Res<InteractionState>,
     mut drag: ResMut<DragSelection>,
     mut selection: ResMut<Selection>,
 ) {
+    if interaction.mode != InteractionMode::Select {
+        return;
+    }
+
     if buttons.just_pressed(MouseButton::Left) {
         let Some((screen_position, world_position)) =
             cursor_screen_and_world_position(&windows, &camera)
@@ -242,8 +310,12 @@ fn move_input(
     camera: Query<(&Camera, &GlobalTransform), With<MainCamera>>,
     mut sim: ResMut<SimResource>,
     selection: Res<Selection>,
+    interaction: Res<InteractionState>,
 ) {
-    if !buttons.just_pressed(MouseButton::Right) || selection.units.is_empty() {
+    if interaction.mode != InteractionMode::Select
+        || !buttons.just_pressed(MouseButton::Right)
+        || selection.units.is_empty()
+    {
         return;
     }
 
@@ -341,6 +413,7 @@ fn update_hud_text(
     diagnostics: Res<DiagnosticsStore>,
     sim: Res<SimResource>,
     selection: Res<Selection>,
+    interaction: Res<InteractionState>,
     mut query: Query<&mut Text, With<HudText>>,
 ) {
     let fps = diagnostics
@@ -351,6 +424,8 @@ fn update_hud_text(
         unit_count: sim.world.units().len(),
         selected_count: selection.units.len(),
         tick: sim.world.tick(),
+        blocked_cell_count: sim.world.blocked_cell_count(),
+        mode: interaction.mode,
     };
 
     for mut text in &mut query {
@@ -369,6 +444,12 @@ fn draw_world(
     let height = f32::from(grid.height) * TILE_SIZE;
     let origin = Vec2::new(-width / 2.0, -height / 2.0);
     let grid_color = Color::srgba(0.42, 0.50, 0.44, 0.2);
+
+    for blocked in sim.world.blocked_cells() {
+        let center =
+            grid_to_translation(f32::from(blocked.x), f32::from(blocked.y), grid, 0.5).truncate();
+        draw_blocked_cell(&mut gizmos, center);
+    }
 
     for x in 0..=grid.width {
         let x_position = origin.x + f32::from(x) * TILE_SIZE;
@@ -522,17 +603,33 @@ fn draw_selection_rect(
     gizmos.line_2d(bottom_left, top_left, color);
 }
 
+fn draw_blocked_cell(gizmos: &mut Gizmos, center: Vec2) {
+    let size = Vec2::splat(TILE_SIZE * 0.92);
+    let color = Color::srgb(0.78, 0.22, 0.18);
+    let half = size / 2.0;
+
+    gizmos.rect_2d(Isometry2d::from_translation(center), size, color);
+    gizmos.line_2d(center - half, center + half, color);
+    gizmos.line_2d(
+        Vec2::new(center.x - half.x, center.y + half.y),
+        Vec2::new(center.x + half.x, center.y - half.y),
+        color,
+    );
+}
+
 fn format_fps(fps: Option<f64>) -> String {
     fps.map_or_else(|| "FPS: --".to_string(), |fps| format!("FPS: {fps:.1}"))
 }
 
 fn format_hud(stats: HudStats) -> String {
     format!(
-        "{}\nUnits: {}\nSelected: {}\nTick: {}\nVSync: off\nHotkeys: 1=100 2=1000 3=5000 R=reset",
+        "{}\nUnits: {}\nSelected: {}\nTick: {}\nBlocked: {}\nMode: {}\nVSync: off\nHotkeys: B=mode 1=100 2=1000 3=5000 R=reset",
         format_fps(stats.fps),
         stats.unit_count,
         stats.selected_count,
-        stats.tick
+        stats.tick,
+        stats.blocked_cell_count,
+        stats.mode.label()
     )
 }
 
@@ -557,11 +654,13 @@ mod tests {
             unit_count: 1_000,
             selected_count: 12,
             tick: 42,
+            blocked_cell_count: 8,
+            mode: InteractionMode::PaintBlocked,
         };
 
         assert_eq!(
             format_hud(stats),
-            "FPS: 144.5\nUnits: 1000\nSelected: 12\nTick: 42\nVSync: off\nHotkeys: 1=100 2=1000 3=5000 R=reset"
+            "FPS: 144.5\nUnits: 1000\nSelected: 12\nTick: 42\nBlocked: 8\nMode: paint blocked\nVSync: off\nHotkeys: B=mode 1=100 2=1000 3=5000 R=reset"
         );
     }
 

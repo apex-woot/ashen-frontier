@@ -27,6 +27,11 @@ impl GridSize {
     pub const fn new(width: u16, height: u16) -> Self {
         Self { width, height }
     }
+
+    #[must_use]
+    pub fn cell_count(self) -> usize {
+        usize::from(self.width) * usize::from(self.height)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -40,6 +45,17 @@ impl GridCoord {
     pub const fn new(x: u16, y: u16) -> Self {
         Self { x, y }
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TerrainCell {
+    Clear,
+    Blocked,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TerrainError {
+    OutOfBounds(GridCoord),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -152,6 +168,7 @@ pub enum CommandResult {
 pub enum CommandRejection {
     EmptySelection,
     DestinationOutOfBounds,
+    BlockedDestination,
     UnknownUnit(UnitId),
 }
 
@@ -162,6 +179,7 @@ pub struct GameWorld {
     tick: u64,
     units: Vec<Unit>,
     buildings: Vec<Building>,
+    terrain: Vec<TerrainCell>,
 }
 
 impl GameWorld {
@@ -178,6 +196,7 @@ impl GameWorld {
                 kind: BuildingKind::CommandCenter,
                 position: center,
             }],
+            terrain: vec![TerrainCell::Clear; config.grid_size.cell_count()],
         };
 
         world.spawn_starting_workers(center);
@@ -205,6 +224,73 @@ impl GameWorld {
     }
 
     #[must_use]
+    pub fn terrain_at(&self, coord: GridCoord) -> Option<TerrainCell> {
+        self.terrain_index(coord)
+            .and_then(|index| self.terrain.get(index).copied())
+    }
+
+    /// Sets one terrain cell.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TerrainError::OutOfBounds`] when `coord` is outside the map.
+    pub fn set_terrain(
+        &mut self,
+        coord: GridCoord,
+        terrain: TerrainCell,
+    ) -> Result<(), TerrainError> {
+        let Some(index) = self.terrain_index(coord) else {
+            return Err(TerrainError::OutOfBounds(coord));
+        };
+
+        if let Some(cell) = self.terrain.get_mut(index) {
+            *cell = terrain;
+        }
+
+        Ok(())
+    }
+
+    /// Sets terrain at a world-space point.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TerrainError::OutOfBounds`] when `point` is outside the map.
+    pub fn set_terrain_at_point(
+        &mut self,
+        point: WorldPoint,
+        terrain: TerrainCell,
+    ) -> Result<(), TerrainError> {
+        let coord = self.world_point_to_grid(point).unwrap_or(GridCoord::new(
+            self.config.grid_size.width,
+            self.config.grid_size.height,
+        ));
+        self.set_terrain(coord, terrain)
+    }
+
+    #[must_use]
+    pub fn blocked_cell_count(&self) -> usize {
+        self.terrain
+            .iter()
+            .filter(|cell| **cell == TerrainCell::Blocked)
+            .count()
+    }
+
+    #[must_use]
+    pub fn blocked_cells(&self) -> Vec<GridCoord> {
+        self.terrain
+            .iter()
+            .enumerate()
+            .filter_map(|(index, cell)| {
+                if *cell == TerrainCell::Blocked {
+                    self.grid_coord_from_index(index)
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    #[must_use]
     pub fn unit(&self, id: UnitId) -> Option<&Unit> {
         self.units.iter().find(|unit| unit.id == id)
     }
@@ -227,6 +313,10 @@ impl GameWorld {
 
                 if !self.contains_world_point(destination) {
                     return CommandResult::Rejected(CommandRejection::DestinationOutOfBounds);
+                }
+
+                if self.is_world_point_blocked(destination) {
+                    return CommandResult::Rejected(CommandRejection::BlockedDestination);
                 }
 
                 if let Some(unknown_id) = units.iter().copied().find(|id| self.unit(*id).is_none())
@@ -258,7 +348,7 @@ impl GameWorld {
         for _ in 0..steps {
             self.tick = self.tick.saturating_add(1);
             for unit in &mut self.units {
-                move_unit_toward_target(unit);
+                move_unit_toward_target(unit, &self.terrain, self.config.grid_size);
             }
         }
     }
@@ -309,6 +399,13 @@ impl GameWorld {
             hash.write_u32(u32::from(building.position.y));
         }
 
+        for cell in &self.terrain {
+            hash.write_u32(match cell {
+                TerrainCell::Clear => 0,
+                TerrainCell::Blocked => 1,
+            });
+        }
+
         for unit in &self.units {
             hash.write_u32(unit.id.value());
             hash.write_u32(match unit.kind {
@@ -356,6 +453,32 @@ impl GameWorld {
             && point.y >= 0.0
             && point.x < f32::from(self.config.grid_size.width)
             && point.y < f32::from(self.config.grid_size.height)
+    }
+
+    fn is_world_point_blocked(&self, point: WorldPoint) -> bool {
+        self.world_point_to_grid(point)
+            .and_then(|coord| self.terrain_at(coord))
+            == Some(TerrainCell::Blocked)
+    }
+
+    fn world_point_to_grid(&self, point: WorldPoint) -> Option<GridCoord> {
+        world_point_to_grid(point, self.config.grid_size)
+    }
+
+    fn terrain_index(&self, coord: GridCoord) -> Option<usize> {
+        terrain_index(coord, self.config.grid_size)
+    }
+
+    fn grid_coord_from_index(&self, index: usize) -> Option<GridCoord> {
+        let width = usize::from(self.config.grid_size.width);
+        if width == 0 || index >= self.terrain.len() {
+            return None;
+        }
+
+        Some(GridCoord::new(
+            u16::try_from(index % width).ok()?,
+            u16::try_from(index / width).ok()?,
+        ))
     }
 }
 
@@ -409,7 +532,7 @@ fn clamp_world_point(point: WorldPoint, grid_size: GridSize) -> WorldPoint {
     WorldPoint::new(point.x.clamp(0.0, max_x), point.y.clamp(0.0, max_y))
 }
 
-fn move_unit_toward_target(unit: &mut Unit) {
+fn move_unit_toward_target(unit: &mut Unit, terrain: &[TerrainCell], grid_size: GridSize) {
     let Some(target) = unit.target else {
         return;
     };
@@ -419,14 +542,69 @@ fn move_unit_toward_target(unit: &mut Unit) {
     let distance = dx.hypot(dy);
 
     if distance <= WORKER_SPEED_PER_TICK {
+        if is_point_blocked(target, terrain, grid_size) {
+            unit.target = None;
+            return;
+        }
+
         unit.position = target;
         unit.target = None;
         return;
     }
 
     let scale = WORKER_SPEED_PER_TICK / distance;
-    unit.position.x += dx * scale;
-    unit.position.y += dy * scale;
+    let next_position = WorldPoint::new(unit.position.x + dx * scale, unit.position.y + dy * scale);
+    if is_point_blocked(next_position, terrain, grid_size) {
+        unit.target = None;
+        return;
+    }
+
+    unit.position = next_position;
+}
+
+fn is_point_blocked(point: WorldPoint, terrain: &[TerrainCell], grid_size: GridSize) -> bool {
+    let Some(coord) = world_point_to_grid(point, grid_size) else {
+        return false;
+    };
+    let Some(index) = terrain_index(coord, grid_size) else {
+        return false;
+    };
+
+    terrain.get(index).copied() == Some(TerrainCell::Blocked)
+}
+
+fn world_point_to_grid(point: WorldPoint, grid_size: GridSize) -> Option<GridCoord> {
+    if point.x < 0.0
+        || point.y < 0.0
+        || point.x >= f32::from(grid_size.width)
+        || point.y >= f32::from(grid_size.height)
+    {
+        return None;
+    }
+
+    Some(GridCoord::new(
+        bounded_floor_to_u16(point.x),
+        bounded_floor_to_u16(point.y),
+    ))
+}
+
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+fn bounded_floor_to_u16(value: f32) -> u16 {
+    let floored = value.floor();
+    if floored <= 0.0 {
+        return 0;
+    }
+
+    let capped = floored.min(f32::from(u16::MAX));
+    capped as u16
+}
+
+fn terrain_index(coord: GridCoord, grid_size: GridSize) -> Option<usize> {
+    if coord.x >= grid_size.width || coord.y >= grid_size.height {
+        return None;
+    }
+
+    Some(usize::from(coord.y) * usize::from(grid_size.width) + usize::from(coord.x))
 }
 
 #[derive(Default)]
@@ -529,6 +707,68 @@ mod tests {
         ));
 
         assert_eq!(selected.len(), 6);
+    }
+
+    #[test]
+    fn terrain_cells_can_be_blocked_and_counted() {
+        let mut world = GameWorld::new(SimConfig::new(32, 24), 7);
+        let coord = GridCoord::new(4, 5);
+
+        assert_eq!(world.terrain_at(coord), Some(TerrainCell::Clear));
+        assert_eq!(world.blocked_cell_count(), 0);
+
+        assert_eq!(world.set_terrain(coord, TerrainCell::Blocked), Ok(()));
+
+        assert_eq!(world.terrain_at(coord), Some(TerrainCell::Blocked));
+        assert_eq!(world.blocked_cell_count(), 1);
+    }
+
+    #[test]
+    fn move_command_rejects_blocked_destination_without_mutating_units() {
+        let mut world = GameWorld::new(SimConfig::new(32, 24), 7);
+        let unit_id = world.units()[0].id;
+        let before = world.history_hash();
+
+        assert_eq!(
+            world.set_terrain(GridCoord::new(18, 12), TerrainCell::Blocked),
+            Ok(())
+        );
+        let result = world.submit_command(Command::MoveUnits {
+            units: vec![unit_id],
+            destination: WorldPoint::new(18.2, 12.2),
+        });
+
+        assert_eq!(
+            result,
+            CommandResult::Rejected(CommandRejection::BlockedDestination)
+        );
+        assert_eq!(world.unit(unit_id).and_then(|unit| unit.target), None);
+        assert_ne!(world.history_hash(), before);
+    }
+
+    #[test]
+    fn unit_stops_before_entering_blocked_cell() {
+        let mut world = GameWorld::new(SimConfig::new(32, 24), 7);
+        let unit_id = world.units()[0].id;
+        let start = world.units()[0].position;
+        let blocked = GridCoord::new(
+            bounded_floor_to_u16(start.x + 1.0),
+            bounded_floor_to_u16(start.y),
+        );
+
+        assert_eq!(world.set_terrain(blocked, TerrainCell::Blocked), Ok(()));
+        assert_eq!(
+            world.submit_command(Command::MoveUnits {
+                units: vec![unit_id],
+                destination: WorldPoint::new(start.x + 2.0, start.y),
+            }),
+            CommandResult::Accepted
+        );
+        world.step(1);
+
+        let unit = world.unit(unit_id).expect("unit should still exist");
+        assert_eq!(unit.position, start);
+        assert_eq!(unit.target, None);
     }
 
     #[test]
