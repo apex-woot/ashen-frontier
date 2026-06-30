@@ -8,15 +8,21 @@ struct Vertex {
 }
 
 final class Renderer: NSObject, MTKViewDelegate {
+    private static let minimumVertexBufferLength = 4096
+
+    private let device: MTLDevice
     private let controller: GameController
     private let commandQueue: MTLCommandQueue
     private let pipelineState: MTLRenderPipelineState
+    private var vertexBuffer: MTLBuffer?
+    private var vertexBufferLength = 0
 
     init(device: MTLDevice, colorPixelFormat: MTLPixelFormat, controller: GameController) throws {
         guard let commandQueue = device.makeCommandQueue() else {
             throw RendererError.missingCommandQueue
         }
 
+        self.device = device
         self.controller = controller
         self.commandQueue = commandQueue
         self.pipelineState = try Self.makePipelineState(device: device, pixelFormat: colorPixelFormat)
@@ -35,10 +41,13 @@ final class Renderer: NSObject, MTKViewDelegate {
 
         controller.stepFrame()
         let viewport = controller.viewport(for: view.bounds.size)
-        var vertices = makeSceneVertices(viewport: viewport)
+        let vertices = makeSceneVertices(viewport: viewport)
+        guard let vertexBuffer = prepareVertexBuffer(for: vertices) else {
+            return
+        }
 
         encoder.setRenderPipelineState(pipelineState)
-        encoder.setVertexBytes(&vertices, length: vertices.count * MemoryLayout<Vertex>.stride, index: 0)
+        encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
         encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: vertices.count)
         encoder.endEncoding()
         commandBuffer.present(drawable)
@@ -91,6 +100,45 @@ final class Renderer: NSObject, MTKViewDelegate {
         descriptor.layouts[0].stride = MemoryLayout<Vertex>.stride
         descriptor.layouts[0].stepFunction = .perVertex
         return descriptor
+    }
+
+    private func prepareVertexBuffer(for vertices: [Vertex]) -> MTLBuffer? {
+        let byteCount = vertices.count * MemoryLayout<Vertex>.stride
+        guard byteCount > 0 else {
+            return nil
+        }
+
+        guard let buffer = vertexBuffer(minimumLength: byteCount) else {
+            return nil
+        }
+
+        vertices.withUnsafeBytes { bytes in
+            guard let baseAddress = bytes.baseAddress else {
+                return
+            }
+
+            buffer.contents().copyMemory(from: baseAddress, byteCount: byteCount)
+        }
+        return buffer
+    }
+
+    private func vertexBuffer(minimumLength: Int) -> MTLBuffer? {
+        if let vertexBuffer, vertexBufferLength >= minimumLength {
+            return vertexBuffer
+        }
+
+        var newLength = max(Self.minimumVertexBufferLength, vertexBufferLength)
+        while newLength < minimumLength {
+            newLength *= 2
+        }
+
+        guard let newBuffer = device.makeBuffer(length: newLength, options: .storageModeShared) else {
+            return nil
+        }
+
+        vertexBuffer = newBuffer
+        vertexBufferLength = newLength
+        return newBuffer
     }
 
     private func makeSceneVertices(viewport: ViewportTransform) -> [Vertex] {

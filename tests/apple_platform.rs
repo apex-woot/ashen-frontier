@@ -93,6 +93,16 @@ fn apple_shell_uses_a_shared_aspect_preserving_viewport() {
 }
 
 #[test]
+fn apple_renderer_uses_vertex_buffers_for_scene_geometry() {
+    let renderer = include_str!("../apple/macos/Sources/AshenFrontierMac/Renderer.swift");
+
+    assert!(renderer.contains("MTLBuffer"));
+    assert!(renderer.contains("makeBuffer"));
+    assert!(renderer.contains("setVertexBuffer"));
+    assert!(!renderer.contains("setVertexBytes"));
+}
+
+#[test]
 fn ios_shell_exposes_touch_camera_controls() {
     let ios_view = include_str!("../apple/ios/AshenFrontierIOS/GameView.swift");
     let ios_controller = include_str!("../apple/ios/AshenFrontierIOS/GameViewController.swift");
