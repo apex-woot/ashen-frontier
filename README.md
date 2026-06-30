@@ -19,4 +19,15 @@ swift run AshenFrontierMac
 
 Open `apple/macos/Package.swift` in Xcode for Apple-side development.
 
-The current Apple shell is a macOS target. Use Xcode's `My Mac` destination for this slice; iOS simulator support comes next.
+Use Xcode's `My Mac` destination for this slice.
+
+## Run the iOS simulator shell
+
+```sh
+sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+rustup target add aarch64-apple-ios-sim x86_64-apple-ios aarch64-apple-ios
+./apple/build-xcframework.sh
+open apple/ios/AshenFrontierIOS.xcodeproj
+```
+
+In Xcode, select an iPhone or iPad simulator and run the `AshenFrontierIOS` target.

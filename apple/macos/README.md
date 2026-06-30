@@ -14,7 +14,7 @@ swift build
 swift run AshenFrontierMac
 ```
 
-Open `apple/macos/Package.swift` in Xcode for IDE work. Select the macOS destination (`My Mac`) for this shell; an iOS simulator app target is the next platform slice.
+Open `apple/macos/Package.swift` in Xcode for IDE work. Select the macOS destination (`My Mac`) for this shell.
 
 ## Controls
 

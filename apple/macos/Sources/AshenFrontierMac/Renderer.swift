@@ -48,6 +48,19 @@ final class Renderer: NSObject, MTKViewDelegate {
         device: MTLDevice,
         pixelFormat: MTLPixelFormat
     ) throws -> MTLRenderPipelineState {
+        let library = try makeShaderLibrary(device: device)
+
+        let descriptor = MTLRenderPipelineDescriptor()
+        descriptor.vertexFunction = library.makeFunction(name: "vertex_main")
+        descriptor.fragmentFunction = library.makeFunction(name: "fragment_main")
+        descriptor.colorAttachments[0].pixelFormat = pixelFormat
+        descriptor.vertexDescriptor = makeVertexDescriptor()
+
+        return try device.makeRenderPipelineState(descriptor: descriptor)
+    }
+
+    private static func makeShaderLibrary(device: MTLDevice) throws -> MTLLibrary {
+#if SWIFT_PACKAGE
         guard let shaderURL = Bundle.module.url(
             forResource: "AshenShaders",
             withExtension: "metal",
@@ -57,15 +70,13 @@ final class Renderer: NSObject, MTKViewDelegate {
         }
 
         let shaderSource = try String(contentsOf: shaderURL)
-        let library = try device.makeLibrary(source: shaderSource, options: nil)
-
-        let descriptor = MTLRenderPipelineDescriptor()
-        descriptor.vertexFunction = library.makeFunction(name: "vertex_main")
-        descriptor.fragmentFunction = library.makeFunction(name: "fragment_main")
-        descriptor.colorAttachments[0].pixelFormat = pixelFormat
-        descriptor.vertexDescriptor = makeVertexDescriptor()
-
-        return try device.makeRenderPipelineState(descriptor: descriptor)
+        return try device.makeLibrary(source: shaderSource, options: nil)
+#else
+        guard let library = device.makeDefaultLibrary() else {
+            throw RendererError.missingShader
+        }
+        return library
+#endif
     }
 
     private static func makeVertexDescriptor() -> MTLVertexDescriptor {

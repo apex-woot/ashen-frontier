@@ -5,4 +5,4 @@ SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 REPO_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/../.." && pwd)
 
 cd "$REPO_ROOT"
-cargo build --release --lib
+cargo build --release --lib --no-default-features
