@@ -2,10 +2,12 @@ import MetalKit
 import UIKit
 
 final class GameViewController: UIViewController {
+    private static let hudRefreshInterval: TimeInterval = 0.25
+
     private let settings: AppSettings
     private var controller: GameController?
     private var renderer: Renderer?
-    private var displayLink: CADisplayLink?
+    private var hudTimer: Timer?
     private let hudLabel = UILabel()
     private let settingsButton = UIButton(type: .system)
 
@@ -42,7 +44,7 @@ final class GameViewController: UIViewController {
         gameView.clearColor = MTLClearColor(red: 0.04, green: 0.05, blue: 0.045, alpha: 1.0)
         gameView.enableSetNeedsDisplay = false
         gameView.isPaused = false
-        gameView.preferredFramesPerSecond = settings.targetFrameRate
+        gameView.preferredFramesPerSecond = min(settings.targetFrameRate, UIScreen.main.maximumFramesPerSecond)
         gameView.spawnHorde = {
             controller.spawnHorde()
         }
@@ -81,29 +83,35 @@ final class GameViewController: UIViewController {
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         navigationController?.setNavigationBarHidden(true, animated: animated)
-        startHudDisplayLink()
+        startHudRefreshTimer()
         applyFrameRate()
         refreshHud()
     }
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
-        stopHudDisplayLink()
+        stopHudRefreshTimer()
     }
 
-    private func startHudDisplayLink() {
-        guard displayLink == nil else {
+    private func startHudRefreshTimer() {
+        guard hudTimer == nil else {
             return
         }
 
-        let displayLink = CADisplayLink(target: self, selector: #selector(refreshHud))
-        displayLink.add(to: .main, forMode: .common)
-        self.displayLink = displayLink
+        let timer = Timer(
+            timeInterval: Self.hudRefreshInterval,
+            target: self,
+            selector: #selector(refreshHud),
+            userInfo: nil,
+            repeats: true
+        )
+        RunLoop.main.add(timer, forMode: .common)
+        hudTimer = timer
     }
 
-    private func stopHudDisplayLink() {
-        displayLink?.invalidate()
-        displayLink = nil
+    private func stopHudRefreshTimer() {
+        hudTimer?.invalidate()
+        hudTimer = nil
     }
 
     private func installHud() {
@@ -143,11 +151,6 @@ final class GameViewController: UIViewController {
         let metalView = view as? MTKView
         metalView?.preferredFramesPerSecond = preferredFrameRate
         metalView?.isPaused = false
-        displayLink?.preferredFrameRateRange = CAFrameRateRange(
-            minimum: 30,
-            maximum: Float(preferredFrameRate),
-            preferred: Float(preferredFrameRate)
-        )
     }
 
     private var effectiveFrameRate: Int {
@@ -166,6 +169,7 @@ final class GameViewController: UIViewController {
         let settingsViewController = SettingsViewController(settings: settings)
         settingsViewController.onSettingsChanged = { [weak self] in
             self?.applyFrameRate()
+            self?.refreshHud()
         }
         navigationController?.pushViewController(settingsViewController, animated: true)
     }

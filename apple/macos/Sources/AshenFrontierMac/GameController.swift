@@ -112,8 +112,8 @@ final class GameController {
         """
         FPS: \(String(format: "%.1f", fps))
         Tick: \(world.tick)
-        Units: \(world.units().count)
-        Enemies: \(world.enemies().count)
+        Units: \(world.unitCount)
+        Enemies: \(world.enemyCount)
         Selected: \(selectedUnitIDs.count)
         Command: \(commandStatusLabel(lastCommandStatus))
         Controls: \(controlHint)

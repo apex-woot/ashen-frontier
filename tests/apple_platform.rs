@@ -141,7 +141,7 @@ fn ios_shell_has_menu_settings_and_frame_rate_selection() {
     assert!(app_settings.contains("120"));
     assert!(game_controller.contains("settings.targetFrameRate"));
     assert!(game_controller.contains("preferredFramesPerSecond"));
-    assert!(game_controller.contains("preferredFrameRateRange"));
+    assert!(game_controller.contains("preferredFramesPerSecond = preferredFrameRate"));
 }
 
 #[test]
@@ -152,10 +152,27 @@ fn ios_frame_rate_setting_reapplies_after_returning_from_settings() {
     assert!(info_plist.contains("<key>CADisableMinimumFrameDurationOnPhone</key>"));
     assert!(game_controller.contains("override func viewWillAppear"));
     assert!(game_controller.contains("override func viewWillDisappear"));
-    assert!(game_controller.contains("startHudDisplayLink"));
-    assert!(game_controller.contains("stopHudDisplayLink"));
+    assert!(game_controller.contains("startHudRefreshTimer"));
+    assert!(game_controller.contains("stopHudRefreshTimer"));
     assert!(game_controller.contains("effectiveFrameRate"));
     assert!(game_controller.contains("Target FPS"));
     assert!(game_controller.contains("applyFrameRate()"));
     assert!(!game_controller.contains("override func viewDidDisappear"));
+}
+
+#[test]
+fn ios_hud_refresh_is_throttled_below_the_render_loop() {
+    let game_controller = include_str!("../apple/ios/AshenFrontierIOS/GameViewController.swift");
+    let rust_world = include_str!("../apple/macos/Sources/AshenFrontierMac/RustWorld.swift");
+    let shared_controller =
+        include_str!("../apple/macos/Sources/AshenFrontierMac/GameController.swift");
+
+    assert!(game_controller.contains("hudRefreshInterval"));
+    assert!(game_controller.contains("timeInterval: Self.hudRefreshInterval"));
+    assert!(game_controller.contains("selector: #selector(refreshHud)"));
+    assert!(!game_controller.contains("CADisplayLink"));
+    assert!(rust_world.contains("var unitCount: Int"));
+    assert!(rust_world.contains("var enemyCount: Int"));
+    assert!(shared_controller.contains("world.unitCount"));
+    assert!(shared_controller.contains("world.enemyCount"));
 }

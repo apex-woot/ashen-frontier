@@ -19,6 +19,14 @@ final class RustWorld {
         af_world_tick(handle)
     }
 
+    var unitCount: Int {
+        af_world_unit_count(handle)
+    }
+
+    var enemyCount: Int {
+        af_world_enemy_count(handle)
+    }
+
     func step(_ steps: UInt32) {
         af_world_step(handle, steps)
     }
