@@ -14,6 +14,8 @@ const GRID_HEIGHT: u16 = 24;
 const SIM_SEED: u64 = 7;
 const TILE_SIZE: f32 = 32.0;
 const SIM_TICK_SECONDS: f32 = 0.1;
+const CLICK_SELECT_RADIUS: f32 = 0.75;
+const DRAG_SELECT_THRESHOLD_PIXELS: f32 = 6.0;
 const STRESS_PRESET_SMALL: usize = 100;
 const STRESS_PRESET_MEDIUM: usize = 1_000;
 const STRESS_PRESET_LARGE: usize = 5_000;
@@ -26,6 +28,7 @@ fn main() {
             accumulator: 0.0,
         })
         .insert_resource(Selection::default())
+        .insert_resource(DragSelection::default())
         .add_plugins((
             DefaultPlugins.set(WindowPlugin {
                 primary_window: Some(Window {
@@ -65,6 +68,14 @@ struct SimResource {
 #[derive(Resource, Default)]
 struct Selection {
     units: Vec<UnitId>,
+}
+
+#[derive(Resource, Default)]
+struct DragSelection {
+    start_world: Option<WorldPoint>,
+    current_world: Option<WorldPoint>,
+    start_screen: Option<Vec2>,
+    current_screen: Option<Vec2>,
 }
 
 #[derive(Component)]
@@ -178,22 +189,51 @@ fn selection_input(
     windows: Query<&Window, With<PrimaryWindow>>,
     camera: Query<(&Camera, &GlobalTransform), With<MainCamera>>,
     sim: Res<SimResource>,
+    mut drag: ResMut<DragSelection>,
     mut selection: ResMut<Selection>,
 ) {
-    if !buttons.just_pressed(MouseButton::Left) {
-        return;
+    if buttons.just_pressed(MouseButton::Left) {
+        let Some((screen_position, world_position)) =
+            cursor_screen_and_world_position(&windows, &camera)
+        else {
+            return;
+        };
+        let sim_position = bevy_to_world_point(world_position, sim.world.grid_size());
+        drag.start_world = Some(sim_position);
+        drag.current_world = Some(sim_position);
+        drag.start_screen = Some(screen_position);
+        drag.current_screen = Some(screen_position);
     }
 
-    let Some(world_position) = cursor_world_position(&windows, &camera) else {
-        return;
-    };
-    let sim_position = bevy_to_world_point(world_position, sim.world.grid_size());
-    let rect = WorldRect::from_corners(
-        WorldPoint::new(sim_position.x - 0.75, sim_position.y - 0.75),
-        WorldPoint::new(sim_position.x + 0.75, sim_position.y + 0.75),
-    );
+    if buttons.pressed(MouseButton::Left)
+        && let Some((screen_position, world_position)) =
+            cursor_screen_and_world_position(&windows, &camera)
+    {
+        drag.current_world = Some(bevy_to_world_point(world_position, sim.world.grid_size()));
+        drag.current_screen = Some(screen_position);
+    }
 
-    selection.units = sim.world.select_units(rect);
+    if buttons.just_released(MouseButton::Left) {
+        if let Some((screen_position, world_position)) =
+            cursor_screen_and_world_position(&windows, &camera)
+        {
+            drag.current_world = Some(bevy_to_world_point(world_position, sim.world.grid_size()));
+            drag.current_screen = Some(screen_position);
+        }
+
+        if let (Some(start_world), Some(current_world), Some(start_screen), Some(current_screen)) = (
+            drag.start_world,
+            drag.current_world,
+            drag.start_screen,
+            drag.current_screen,
+        ) {
+            let rect =
+                selection_rect_from_drag(start_world, current_world, start_screen, current_screen);
+            selection.units = sim.world.select_units(rect);
+        }
+
+        *drag = DragSelection::default();
+    }
 }
 
 fn move_input(
@@ -318,7 +358,12 @@ fn update_hud_text(
     }
 }
 
-fn draw_world(mut gizmos: Gizmos, sim: Res<SimResource>, selection: Res<Selection>) {
+fn draw_world(
+    mut gizmos: Gizmos,
+    sim: Res<SimResource>,
+    selection: Res<Selection>,
+    drag: Res<DragSelection>,
+) {
     let grid = sim.world.grid_size();
     let width = f32::from(grid.width) * TILE_SIZE;
     let height = f32::from(grid.height) * TILE_SIZE;
@@ -353,6 +398,16 @@ fn draw_world(mut gizmos: Gizmos, sim: Res<SimResource>, selection: Res<Selectio
             Color::srgb(0.95, 0.86, 0.34),
         );
     }
+
+    if let (Some(start_world), Some(current_world), Some(start_screen), Some(current_screen)) = (
+        drag.start_world,
+        drag.current_world,
+        drag.start_screen,
+        drag.current_screen,
+    ) && is_drag_selection(start_screen, current_screen)
+    {
+        draw_selection_rect(&mut gizmos, start_world, current_world, grid);
+    }
 }
 
 fn cursor_world_position(
@@ -366,6 +421,20 @@ fn cursor_world_position(
     camera
         .viewport_to_world_2d(camera_transform, cursor_position)
         .ok()
+}
+
+fn cursor_screen_and_world_position(
+    windows: &Query<&Window, With<PrimaryWindow>>,
+    camera: &Query<(&Camera, &GlobalTransform), With<MainCamera>>,
+) -> Option<(Vec2, Vec2)> {
+    let window = windows.iter().next()?;
+    let cursor_position = window.cursor_position()?;
+    let (camera, camera_transform) = camera.iter().next()?;
+    let world_position = camera
+        .viewport_to_world_2d(camera_transform, cursor_position)
+        .ok()?;
+
+    Some((cursor_position, world_position))
 }
 
 fn world_to_translation(position: WorldPoint, grid_size: GridSize, z: f32) -> Vec3 {
@@ -405,6 +474,52 @@ fn unit_color(selected: bool) -> Color {
     } else {
         Color::srgb(0.76, 0.82, 0.64)
     }
+}
+
+fn selection_rect_from_drag(
+    start_world: WorldPoint,
+    current_world: WorldPoint,
+    start_screen: Vec2,
+    current_screen: Vec2,
+) -> WorldRect {
+    if is_drag_selection(start_screen, current_screen) {
+        WorldRect::from_corners(start_world, current_world)
+    } else {
+        WorldRect::from_corners(
+            WorldPoint::new(
+                start_world.x - CLICK_SELECT_RADIUS,
+                start_world.y - CLICK_SELECT_RADIUS,
+            ),
+            WorldPoint::new(
+                start_world.x + CLICK_SELECT_RADIUS,
+                start_world.y + CLICK_SELECT_RADIUS,
+            ),
+        )
+    }
+}
+
+fn is_drag_selection(start_screen: Vec2, current_screen: Vec2) -> bool {
+    start_screen.distance(current_screen) > DRAG_SELECT_THRESHOLD_PIXELS
+}
+
+fn draw_selection_rect(
+    gizmos: &mut Gizmos,
+    start_world: WorldPoint,
+    current_world: WorldPoint,
+    grid_size: GridSize,
+) {
+    let start = world_to_translation(start_world, grid_size, 4.0).truncate();
+    let end = world_to_translation(current_world, grid_size, 4.0).truncate();
+    let top_left = Vec2::new(start.x.min(end.x), start.y.max(end.y));
+    let top_right = Vec2::new(start.x.max(end.x), start.y.max(end.y));
+    let bottom_right = Vec2::new(start.x.max(end.x), start.y.min(end.y));
+    let bottom_left = Vec2::new(start.x.min(end.x), start.y.min(end.y));
+    let color = Color::srgb(0.95, 0.86, 0.34);
+
+    gizmos.line_2d(top_left, top_right, color);
+    gizmos.line_2d(top_right, bottom_right, color);
+    gizmos.line_2d(bottom_right, bottom_left, color);
+    gizmos.line_2d(bottom_left, top_left, color);
 }
 
 fn format_fps(fps: Option<f64>) -> String {
@@ -448,5 +563,31 @@ mod tests {
             format_hud(stats),
             "FPS: 144.5\nUnits: 1000\nSelected: 12\nTick: 42\nVSync: off\nHotkeys: 1=100 2=1000 3=5000 R=reset"
         );
+    }
+
+    #[test]
+    fn selection_rect_uses_click_radius_for_tiny_drags() {
+        let rect = selection_rect_from_drag(
+            WorldPoint::new(10.0, 10.0),
+            WorldPoint::new(10.1, 10.1),
+            Vec2::new(100.0, 100.0),
+            Vec2::new(102.0, 101.0),
+        );
+
+        assert!(rect.contains(WorldPoint::new(9.3, 10.0)));
+        assert!(!rect.contains(WorldPoint::new(9.2, 10.0)));
+    }
+
+    #[test]
+    fn selection_rect_uses_drag_corners_for_large_drags() {
+        let rect = selection_rect_from_drag(
+            WorldPoint::new(8.0, 6.0),
+            WorldPoint::new(12.0, 9.0),
+            Vec2::new(100.0, 100.0),
+            Vec2::new(180.0, 140.0),
+        );
+
+        assert!(rect.contains(WorldPoint::new(10.0, 8.0)));
+        assert!(!rect.contains(WorldPoint::new(7.9, 8.0)));
     }
 }

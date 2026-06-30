@@ -1,5 +1,6 @@
 const STARTING_WORKERS: usize = 6;
 const WORKER_SPEED_PER_TICK: f32 = 1.5;
+const GROUP_MOVE_SPACING: f32 = 0.8;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SimConfig {
@@ -233,11 +234,19 @@ impl GameWorld {
                     return CommandResult::Rejected(CommandRejection::UnknownUnit(unknown_id));
                 }
 
-                for unit_id in units {
+                let unit_count = units.len();
+                for (index, unit_id) in units.into_iter().enumerate() {
+                    let target = group_move_target(
+                        index,
+                        unit_count,
+                        destination,
+                        self.config.grid_size,
+                        GROUP_MOVE_SPACING,
+                    );
                     let Some(unit) = self.units.iter_mut().find(|unit| unit.id == unit_id) else {
                         return CommandResult::Rejected(CommandRejection::UnknownUnit(unit_id));
                     };
-                    unit.target = Some(destination);
+                    unit.target = Some(target);
                 }
 
                 CommandResult::Accepted
@@ -354,6 +363,52 @@ fn stress_jitter(slot: usize) -> f32 {
     0.23 + f32::from(u8::try_from(slot).unwrap_or(0)) * 0.18
 }
 
+fn group_move_target(
+    index: usize,
+    unit_count: usize,
+    destination: WorldPoint,
+    grid_size: GridSize,
+    spacing: f32,
+) -> WorldPoint {
+    if unit_count <= 1 {
+        return destination;
+    }
+
+    let columns = square_root_ceil(unit_count);
+    let rows = unit_count.div_ceil(columns);
+    let column = index % columns;
+    let row = index / columns;
+    let x_offset = (small_usize_to_f32(column)
+        - small_usize_to_f32(columns.saturating_sub(1)) / 2.0)
+        * spacing;
+    let y_offset =
+        (small_usize_to_f32(row) - small_usize_to_f32(rows.saturating_sub(1)) / 2.0) * spacing;
+
+    clamp_world_point(
+        WorldPoint::new(destination.x + x_offset, destination.y + y_offset),
+        grid_size,
+    )
+}
+
+fn square_root_ceil(value: usize) -> usize {
+    let mut root = 1;
+    while root * root < value {
+        root += 1;
+    }
+    root
+}
+
+fn small_usize_to_f32(value: usize) -> f32 {
+    f32::from(u16::try_from(value).unwrap_or(u16::MAX))
+}
+
+fn clamp_world_point(point: WorldPoint, grid_size: GridSize) -> WorldPoint {
+    let max_x = (f32::from(grid_size.width) - f32::EPSILON).max(0.0);
+    let max_y = (f32::from(grid_size.height) - f32::EPSILON).max(0.0);
+
+    WorldPoint::new(point.x.clamp(0.0, max_x), point.y.clamp(0.0, max_y))
+}
+
 fn move_unit_toward_target(unit: &mut Unit) {
     let Some(target) = unit.target else {
         return;
@@ -436,6 +491,32 @@ mod tests {
         assert_eq!(world.tick(), 1);
         assert!(unit.position.x > start.x);
         assert!((unit.position.y - start.y).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn multi_unit_move_assigns_spaced_formation_targets() {
+        let mut world = GameWorld::new(SimConfig::new(32, 24), 7);
+        let units = world
+            .units()
+            .iter()
+            .take(4)
+            .map(|unit| unit.id)
+            .collect::<Vec<_>>();
+
+        let result = world.submit_command(Command::MoveUnits {
+            units: units.clone(),
+            destination: WorldPoint::new(16.0, 12.0),
+        });
+
+        assert_eq!(result, CommandResult::Accepted);
+        let targets = units
+            .iter()
+            .map(|unit_id| world.unit(*unit_id).and_then(|unit| unit.target).unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(targets[0], WorldPoint::new(15.6, 11.6));
+        assert_eq!(targets[1], WorldPoint::new(16.4, 11.6));
+        assert_eq!(targets[2], WorldPoint::new(15.6, 12.4));
+        assert_eq!(targets[3], WorldPoint::new(16.4, 12.4));
     }
 
     #[test]
