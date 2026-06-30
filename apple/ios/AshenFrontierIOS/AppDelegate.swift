@@ -9,7 +9,8 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
     ) -> Bool {
         let window = UIWindow(frame: UIScreen.main.bounds)
-        window.rootViewController = GameViewController()
+        let menuViewController = MainMenuViewController(settings: .shared)
+        window.rootViewController = UINavigationController(rootViewController: menuViewController)
         window.makeKeyAndVisible()
         self.window = window
         return true

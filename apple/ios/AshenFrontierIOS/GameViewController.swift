@@ -2,10 +2,21 @@ import MetalKit
 import UIKit
 
 final class GameViewController: UIViewController {
+    private let settings: AppSettings
     private var controller: GameController?
     private var renderer: Renderer?
     private var displayLink: CADisplayLink?
     private let hudLabel = UILabel()
+    private let settingsButton = UIButton(type: .system)
+
+    init(settings: AppSettings = .shared) {
+        self.settings = settings
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
 
     override var supportedInterfaceOrientations: UIInterfaceOrientationMask {
         .portrait
@@ -31,7 +42,7 @@ final class GameViewController: UIViewController {
         gameView.clearColor = MTLClearColor(red: 0.04, green: 0.05, blue: 0.045, alpha: 1.0)
         gameView.enableSetNeedsDisplay = false
         gameView.isPaused = false
-        gameView.preferredFramesPerSecond = UIScreen.main.maximumFramesPerSecond
+        gameView.preferredFramesPerSecond = settings.targetFrameRate
         gameView.spawnHorde = {
             controller.spawnHorde()
         }
@@ -62,16 +73,14 @@ final class GameViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        navigationController?.setNavigationBarHidden(true, animated: false)
         installHud()
+        installSettingsButton()
 
         let displayLink = CADisplayLink(target: self, selector: #selector(refreshHud))
-        displayLink.preferredFrameRateRange = CAFrameRateRange(
-            minimum: 30,
-            maximum: Float(UIScreen.main.maximumFramesPerSecond),
-            preferred: Float(UIScreen.main.maximumFramesPerSecond)
-        )
         displayLink.add(to: .main, forMode: .common)
         self.displayLink = displayLink
+        applyFrameRate()
     }
 
     override func viewDidDisappear(_ animated: Bool) {
@@ -94,7 +103,43 @@ final class GameViewController: UIViewController {
         ])
     }
 
+    private func installSettingsButton() {
+        settingsButton.setTitle("Settings", for: .normal)
+        settingsButton.titleLabel?.font = .systemFont(ofSize: 14, weight: .semibold)
+        settingsButton.tintColor = UIColor(red: 0.86, green: 0.91, blue: 0.82, alpha: 1.0)
+        settingsButton.backgroundColor = UIColor(red: 0.08, green: 0.12, blue: 0.10, alpha: 0.72)
+        settingsButton.layer.cornerRadius = 8
+        settingsButton.translatesAutoresizingMaskIntoConstraints = false
+        settingsButton.addTarget(self, action: #selector(openSettings), for: .touchUpInside)
+        view.addSubview(settingsButton)
+
+        NSLayoutConstraint.activate([
+            settingsButton.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -12),
+            settingsButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 10),
+            settingsButton.widthAnchor.constraint(equalToConstant: 88),
+            settingsButton.heightAnchor.constraint(equalToConstant: 36),
+        ])
+    }
+
+    private func applyFrameRate() {
+        let preferredFrameRate = min(settings.targetFrameRate, UIScreen.main.maximumFramesPerSecond)
+        (view as? MTKView)?.preferredFramesPerSecond = preferredFrameRate
+        displayLink?.preferredFrameRateRange = CAFrameRateRange(
+            minimum: 30,
+            maximum: Float(preferredFrameRate),
+            preferred: Float(preferredFrameRate)
+        )
+    }
+
     @objc private func refreshHud() {
         hudLabel.text = controller?.hudText()
+    }
+
+    @objc private func openSettings() {
+        let settingsViewController = SettingsViewController(settings: settings)
+        settingsViewController.onSettingsChanged = { [weak self] in
+            self?.applyFrameRate()
+        }
+        navigationController?.pushViewController(settingsViewController, animated: true)
     }
 }

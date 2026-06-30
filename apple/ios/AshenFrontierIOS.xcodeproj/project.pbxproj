@@ -17,6 +17,9 @@
 		AF0100080000000000000001 /* AshenFrontierRust.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = AF0200080000000000000001 /* AshenFrontierRust.xcframework */; };
 		AF0100090000000000000001 /* Metal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = AF0200090000000000000001 /* Metal.framework */; };
 		AF01000A0000000000000001 /* MetalKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = AF02000A0000000000000001 /* MetalKit.framework */; };
+		AF01000B0000000000000001 /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF02000D0000000000000001 /* AppSettings.swift */; };
+		AF01000C0000000000000001 /* MainMenuViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF02000E0000000000000001 /* MainMenuViewController.swift */; };
+		AF01000D0000000000000001 /* SettingsViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF02000F0000000000000001 /* SettingsViewController.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -32,6 +35,9 @@
 		AF02000A0000000000000001 /* MetalKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MetalKit.framework; path = System/Library/Frameworks/MetalKit.framework; sourceTree = SDKROOT; };
 		AF02000B0000000000000001 /* AshenFrontierIOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AshenFrontierIOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		AF02000C0000000000000001 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		AF02000D0000000000000001 /* AppSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettings.swift; sourceTree = "<group>"; };
+		AF02000E0000000000000001 /* MainMenuViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainMenuViewController.swift; sourceTree = "<group>"; };
+		AF02000F0000000000000001 /* SettingsViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsViewController.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -62,8 +68,11 @@
 			isa = PBXGroup;
 			children = (
 				AF0200010000000000000001 /* AppDelegate.swift */,
+				AF02000D0000000000000001 /* AppSettings.swift */,
 				AF0200020000000000000001 /* GameView.swift */,
 				AF0200030000000000000001 /* GameViewController.swift */,
+				AF02000E0000000000000001 /* MainMenuViewController.swift */,
+				AF02000F0000000000000001 /* SettingsViewController.swift */,
 				AF02000C0000000000000001 /* Info.plist */,
 			);
 			path = AshenFrontierIOS;
@@ -169,6 +178,9 @@
 				AF0100010000000000000001 /* AppDelegate.swift in Sources */,
 				AF0100020000000000000001 /* GameView.swift in Sources */,
 				AF0100030000000000000001 /* GameViewController.swift in Sources */,
+				AF01000C0000000000000001 /* MainMenuViewController.swift in Sources */,
+				AF01000D0000000000000001 /* SettingsViewController.swift in Sources */,
+				AF01000B0000000000000001 /* AppSettings.swift in Sources */,
 				AF0100040000000000000001 /* RustWorld.swift in Sources */,
 				AF0100050000000000000001 /* GameController.swift in Sources */,
 				AF0100060000000000000001 /* Renderer.swift in Sources */,

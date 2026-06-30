@@ -31,6 +31,8 @@ In Xcode, choose an iPhone or iPad simulator and run the `AshenFrontierIOS` targ
 
 The iOS shell is portrait-first. The app declares portrait as its supported orientation and requires full screen on iPad so the orientation lock is honored.
 
+The app starts on a main menu. Use Settings to switch the target frame rate between 60 FPS and 120 FPS; the game applies the setting to the Metal view and HUD refresh loop.
+
 ## Controls
 
 - Single tap: select the nearest unit.

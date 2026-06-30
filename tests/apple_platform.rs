@@ -110,3 +110,36 @@ fn ios_shell_exposes_touch_camera_controls() {
     assert!(ios_controller.contains("Drag=pan"));
     assert!(ios_controller.contains("Pinch=zoom"));
 }
+
+#[test]
+fn ios_shell_has_menu_settings_and_frame_rate_selection() {
+    let project = include_str!("../apple/ios/AshenFrontierIOS.xcodeproj/project.pbxproj");
+    let app_delegate = include_str!("../apple/ios/AshenFrontierIOS/AppDelegate.swift");
+    let game_controller = include_str!("../apple/ios/AshenFrontierIOS/GameViewController.swift");
+    let menu = include_str!("../apple/ios/AshenFrontierIOS/MainMenuViewController.swift");
+    let settings = include_str!("../apple/ios/AshenFrontierIOS/SettingsViewController.swift");
+    let app_settings = include_str!("../apple/ios/AshenFrontierIOS/AppSettings.swift");
+
+    assert!(Path::new("apple/ios/AshenFrontierIOS/MainMenuViewController.swift").exists());
+    assert!(Path::new("apple/ios/AshenFrontierIOS/SettingsViewController.swift").exists());
+    assert!(Path::new("apple/ios/AshenFrontierIOS/AppSettings.swift").exists());
+    assert!(project.contains("MainMenuViewController.swift"));
+    assert!(project.contains("SettingsViewController.swift"));
+    assert!(project.contains("AppSettings.swift"));
+
+    assert!(app_delegate.contains("UINavigationController"));
+    assert!(app_delegate.contains("MainMenuViewController"));
+    assert!(menu.contains("startGame"));
+    assert!(menu.contains("openSettings"));
+    assert!(menu.contains("GameViewController(settings: settings)"));
+    assert!(settings.contains("UISegmentedControl"));
+    assert!(settings.contains("60 FPS"));
+    assert!(settings.contains("120 FPS"));
+    assert!(settings.contains("targetFrameRate"));
+    assert!(app_settings.contains("targetFrameRate"));
+    assert!(app_settings.contains("60"));
+    assert!(app_settings.contains("120"));
+    assert!(game_controller.contains("settings.targetFrameRate"));
+    assert!(game_controller.contains("preferredFramesPerSecond"));
+    assert!(game_controller.contains("preferredFrameRateRange"));
+}
