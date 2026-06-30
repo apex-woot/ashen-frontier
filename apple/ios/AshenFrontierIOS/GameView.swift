@@ -1,10 +1,12 @@
 import MetalKit
 import UIKit
 
-final class GameView: MTKView {
+final class GameView: MTKView, UIGestureRecognizerDelegate {
     var spawnHorde: (() -> Void)?
     var selectUnit: ((CGPoint, CGSize) -> Void)?
     var moveSelectedUnits: ((CGPoint, CGSize) -> Void)?
+    var panCamera: ((CGSize, CGSize) -> Void)?
+    var zoomCamera: ((CGFloat, CGPoint, CGSize) -> Void)?
 
     override init(frame frameRect: CGRect, device: MTLDevice?) {
         super.init(frame: frameRect, device: device)
@@ -31,6 +33,14 @@ final class GameView: MTKView {
         let movePress = UILongPressGestureRecognizer(target: self, action: #selector(handleMovePress(_:)))
         movePress.minimumPressDuration = 0.25
         addGestureRecognizer(movePress)
+
+        let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
+        pan.delegate = self
+        addGestureRecognizer(pan)
+
+        let pinch = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:)))
+        pinch.delegate = self
+        addGestureRecognizer(pinch)
     }
 
     @objc private func handleSelectTap(_ recognizer: UITapGestureRecognizer) {
@@ -57,8 +67,38 @@ final class GameView: MTKView {
         moveSelectedUnits?(touchPointForWorld(from: recognizer), bounds.size)
     }
 
+    @objc private func handlePan(_ recognizer: UIPanGestureRecognizer) {
+        guard recognizer.state == .changed else {
+            return
+        }
+
+        panCamera?(translationForWorld(from: recognizer), bounds.size)
+        recognizer.setTranslation(.zero, in: self)
+    }
+
+    @objc private func handlePinch(_ recognizer: UIPinchGestureRecognizer) {
+        guard recognizer.state == .changed else {
+            return
+        }
+
+        zoomCamera?(recognizer.scale, touchPointForWorld(from: recognizer), bounds.size)
+        recognizer.scale = 1.0
+    }
+
+    func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer,
+        shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+    ) -> Bool {
+        true
+    }
+
     private func touchPointForWorld(from recognizer: UIGestureRecognizer) -> CGPoint {
         let point = recognizer.location(in: self)
         return CGPoint(x: point.x, y: bounds.height - point.y)
+    }
+
+    private func translationForWorld(from recognizer: UIPanGestureRecognizer) -> CGSize {
+        let translation = recognizer.translation(in: self)
+        return CGSize(width: translation.x, height: -translation.y)
     }
 }

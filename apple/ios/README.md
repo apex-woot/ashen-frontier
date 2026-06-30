@@ -35,4 +35,6 @@ The iOS shell is portrait-first. The app declares portrait as its supported orie
 
 - Single tap: select the nearest unit.
 - Long press: move the selected unit through the Rust C ABI.
+- Drag: pan the camera.
+- Pinch: zoom the camera.
 - Two-finger tap: spawn a 64-enemy horde through the Rust C ABI.

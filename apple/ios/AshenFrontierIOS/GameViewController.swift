@@ -23,7 +23,8 @@ final class GameViewController: UIViewController {
         let world = RustWorld(width: 32, height: 24)
         let controller = GameController(
             world: world,
-            controlHint: "Tap=select  Long press=move  Two-finger=horde"
+            controlHint: "Tap=select  Long press=move  Drag=pan  Pinch=zoom  Two-finger=horde",
+            initialCameraZoom: 2.0
         )
         let gameView = GameView(frame: .zero, device: device)
         gameView.colorPixelFormat = .bgra8Unorm
@@ -39,6 +40,12 @@ final class GameViewController: UIViewController {
         }
         gameView.moveSelectedUnits = { point, size in
             controller.moveSelectedUnits(to: point, in: size)
+        }
+        gameView.panCamera = { translation, size in
+            controller.panCamera(byViewDelta: translation, in: size)
+        }
+        gameView.zoomCamera = { scale, point, size in
+            controller.zoomCamera(by: scale, around: point, in: size)
         }
 
         do {

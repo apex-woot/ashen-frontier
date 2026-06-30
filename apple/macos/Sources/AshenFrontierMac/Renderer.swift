@@ -34,7 +34,8 @@ final class Renderer: NSObject, MTKViewDelegate {
         }
 
         controller.stepFrame()
-        var vertices = makeSceneVertices()
+        let viewport = controller.viewport(for: view.bounds.size)
+        var vertices = makeSceneVertices(viewport: viewport)
 
         encoder.setRenderPipelineState(pipelineState)
         encoder.setVertexBytes(&vertices, length: vertices.count * MemoryLayout<Vertex>.stride, index: 0)
@@ -92,19 +93,19 @@ final class Renderer: NSObject, MTKViewDelegate {
         return descriptor
     }
 
-    private func makeSceneVertices() -> [Vertex] {
+    private func makeSceneVertices(viewport: ViewportTransform) -> [Vertex] {
         var vertices: [Vertex] = []
         appendQuad(
-            center: worldToClip(x: 16.5, y: 12.5),
-            halfSize: SIMD2<Float>(0.045, 0.06),
+            center: viewport.worldToClip(x: 16.5, y: 12.5),
+            halfSize: viewport.worldHalfSizeToClip(SIMD2<Float>(0.72, 0.72)),
             color: SIMD4<Float>(0.12, 0.34, 0.42, 1.0),
             to: &vertices
         )
 
         for unit in controller.units() {
             appendQuad(
-                center: worldToClip(x: unit.x, y: unit.y),
-                halfSize: SIMD2<Float>(0.018, 0.024),
+                center: viewport.worldToClip(x: unit.x, y: unit.y),
+                halfSize: viewport.worldHalfSizeToClip(SIMD2<Float>(0.29, 0.29)),
                 color: controller.isSelected(unitID: unit.id)
                     ? SIMD4<Float>(0.95, 0.86, 0.34, 1.0)
                     : SIMD4<Float>(0.76, 0.82, 0.64, 1.0),
@@ -114,8 +115,8 @@ final class Renderer: NSObject, MTKViewDelegate {
 
         for enemy in controller.enemies() {
             appendQuad(
-                center: worldToClip(x: enemy.x, y: enemy.y),
-                halfSize: SIMD2<Float>(0.016, 0.021),
+                center: viewport.worldToClip(x: enemy.x, y: enemy.y),
+                halfSize: viewport.worldHalfSizeToClip(SIMD2<Float>(0.26, 0.26)),
                 color: SIMD4<Float>(0.78, 0.18, 0.16, 1.0),
                 to: &vertices
             )

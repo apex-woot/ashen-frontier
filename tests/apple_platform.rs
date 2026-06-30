@@ -70,3 +70,43 @@ fn ios_shell_uses_touch_specific_controls_in_the_hud() {
     assert!(ios_controller.contains("Long press=move"));
     assert!(ios_controller.contains("Two-finger=horde"));
 }
+
+#[test]
+fn apple_shell_uses_a_shared_aspect_preserving_viewport() {
+    let controller = include_str!("../apple/macos/Sources/AshenFrontierMac/GameController.swift");
+    let renderer = include_str!("../apple/macos/Sources/AshenFrontierMac/Renderer.swift");
+
+    assert!(controller.contains("struct ViewportTransform"));
+    assert!(controller.contains("min(viewWidth / worldWidth"));
+    assert!(controller.contains("viewPointToWorld"));
+    assert!(controller.contains("worldToClip"));
+    assert!(controller.contains("worldHalfSizeToClip"));
+    assert!(controller.contains("panCamera"));
+    assert!(controller.contains("zoomCamera"));
+    assert!(controller.contains("initialCameraZoom"));
+    assert!(controller.contains("clampCameraCenter"));
+
+    assert!(renderer.contains("controller.viewport"));
+    assert!(renderer.contains("viewport.worldToClip"));
+    assert!(renderer.contains("viewport.worldHalfSizeToClip"));
+    assert!(!renderer.contains("halfSize: SIMD2<Float>(0.018, 0.024)"));
+}
+
+#[test]
+fn ios_shell_exposes_touch_camera_controls() {
+    let ios_view = include_str!("../apple/ios/AshenFrontierIOS/GameView.swift");
+    let ios_controller = include_str!("../apple/ios/AshenFrontierIOS/GameViewController.swift");
+
+    assert!(ios_view.contains("UIPanGestureRecognizer"));
+    assert!(ios_view.contains("UIPinchGestureRecognizer"));
+    assert!(ios_view.contains("panCamera"));
+    assert!(ios_view.contains("zoomCamera"));
+    assert!(ios_view.contains("translationForWorld"));
+    assert!(ios_view.contains("recognizer.scale = 1.0"));
+
+    assert!(ios_controller.contains("controller.panCamera"));
+    assert!(ios_controller.contains("controller.zoomCamera"));
+    assert!(ios_controller.contains("initialCameraZoom: 2.0"));
+    assert!(ios_controller.contains("Drag=pan"));
+    assert!(ios_controller.contains("Pinch=zoom"));
+}
