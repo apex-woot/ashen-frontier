@@ -254,6 +254,35 @@ impl GameWorld {
         }
     }
 
+    pub fn set_worker_count(&mut self, worker_count: usize) {
+        self.units.clear();
+
+        let width = usize::from(self.config.grid_size.width);
+        let height = usize::from(self.config.grid_size.height);
+        if width == 0 || height == 0 {
+            return;
+        }
+
+        let cell_count = width * height;
+        self.units.reserve(worker_count);
+
+        for index in 0..worker_count {
+            let cell_index = index % cell_count;
+            let lap = index / cell_count;
+            let x = u16::try_from(cell_index % width).unwrap_or(0);
+            let y = u16::try_from(cell_index / width).unwrap_or(0);
+            let jitter_x = stress_jitter(lap % 4);
+            let jitter_y = stress_jitter((lap / 4) % 4);
+
+            self.units.push(Unit {
+                id: UnitId::new(u32::try_from(index + 1).unwrap_or(u32::MAX)),
+                kind: UnitKind::Worker,
+                position: WorldPoint::new(f32::from(x) + jitter_x, f32::from(y) + jitter_y),
+                target: None,
+            });
+        }
+    }
+
     #[must_use]
     pub fn history_hash(&self) -> u64 {
         let mut hash = StableHasher::default();
@@ -319,6 +348,10 @@ impl GameWorld {
             && point.x < f32::from(self.config.grid_size.width)
             && point.y < f32::from(self.config.grid_size.height)
     }
+}
+
+fn stress_jitter(slot: usize) -> f32 {
+    0.23 + f32::from(u8::try_from(slot).unwrap_or(0)) * 0.18
 }
 
 fn move_unit_toward_target(unit: &mut Unit) {
@@ -461,5 +494,38 @@ mod tests {
         second.step(4);
 
         assert_eq!(first.history_hash(), second.history_hash());
+    }
+
+    #[test]
+    fn stress_population_sets_exact_worker_count() {
+        let mut world = GameWorld::new(SimConfig::new(32, 24), 7);
+
+        world.set_worker_count(1_000);
+
+        assert_eq!(world.units().len(), 1_000);
+        assert!(
+            world
+                .units()
+                .iter()
+                .all(|unit| unit.kind == UnitKind::Worker)
+        );
+    }
+
+    #[test]
+    fn stress_population_is_deterministic_and_in_bounds() {
+        let mut first = GameWorld::new(SimConfig::new(32, 24), 7);
+        let mut second = GameWorld::new(SimConfig::new(32, 24), 7);
+
+        first.set_worker_count(5_000);
+        second.set_worker_count(5_000);
+
+        assert_eq!(first.history_hash(), second.history_hash());
+        for (index, unit) in first.units().iter().enumerate() {
+            assert_eq!(unit.id, UnitId::new(u32::try_from(index + 1).unwrap()));
+            assert!(unit.position.x >= 0.0);
+            assert!(unit.position.y >= 0.0);
+            assert!(unit.position.x < f32::from(first.grid_size().width));
+            assert!(unit.position.y < f32::from(first.grid_size().height));
+        }
     }
 }

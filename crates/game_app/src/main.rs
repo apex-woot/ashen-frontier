@@ -1,20 +1,28 @@
 #![allow(clippy::needless_pass_by_value)]
 
+use std::collections::HashSet;
+
 use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use bevy::prelude::*;
-use bevy::window::PrimaryWindow;
+use bevy::window::{PresentMode, PrimaryWindow};
 use game_sim::{
-    Command, CommandResult, GameWorld, GridSize, SimConfig, UnitId, WorldPoint, WorldRect,
+    Command, CommandResult, GameWorld, GridSize, SimConfig, Unit, UnitId, WorldPoint, WorldRect,
 };
 
+const GRID_WIDTH: u16 = 32;
+const GRID_HEIGHT: u16 = 24;
+const SIM_SEED: u64 = 7;
 const TILE_SIZE: f32 = 32.0;
 const SIM_TICK_SECONDS: f32 = 0.1;
+const STRESS_PRESET_SMALL: usize = 100;
+const STRESS_PRESET_MEDIUM: usize = 1_000;
+const STRESS_PRESET_LARGE: usize = 5_000;
 
 fn main() {
     App::new()
         .insert_resource(ClearColor(Color::srgb(0.04, 0.05, 0.045)))
         .insert_resource(SimResource {
-            world: GameWorld::new(SimConfig::new(32, 24), 7),
+            world: new_world(),
             accumulator: 0.0,
         })
         .insert_resource(Selection::default())
@@ -23,6 +31,7 @@ fn main() {
                 primary_window: Some(Window {
                     title: "Ashen Frontier".to_string(),
                     resolution: (1280, 720).into(),
+                    present_mode: PresentMode::AutoNoVsync,
                     ..default()
                 }),
                 ..default()
@@ -36,11 +45,13 @@ fn main() {
                 camera_controls,
                 selection_input,
                 move_input,
+                apply_stress_hotkeys,
                 tick_simulation,
                 sync_unit_visuals,
-                update_fps_text,
+                update_hud_text,
                 draw_world,
-            ),
+            )
+                .chain(),
         )
         .run();
 }
@@ -68,14 +79,27 @@ struct UnitVisual {
 struct BuildingVisual;
 
 #[derive(Component)]
-struct FpsText;
+struct HudText;
+
+#[derive(Clone, Copy)]
+struct HudStats {
+    fps: Option<f64>,
+    unit_count: usize,
+    selected_count: usize,
+    tick: u64,
+}
 
 fn setup(mut commands: Commands, sim: Res<SimResource>) {
     commands.spawn((Camera2d, MainCamera));
     let grid_size = sim.world.grid_size();
 
     commands.spawn((
-        Text::new(format_fps(None)),
+        Text::new(format_hud(HudStats {
+            fps: None,
+            unit_count: sim.world.units().len(),
+            selected_count: 0,
+            tick: sim.world.tick(),
+        })),
         TextFont {
             font_size: FontSize::Px(18.0),
             ..default()
@@ -87,7 +111,7 @@ fn setup(mut commands: Commands, sim: Res<SimResource>) {
             top: Val::Px(10.0),
             ..default()
         },
-        FpsText,
+        HudText,
     ));
 
     for building in sim.world.buildings() {
@@ -104,11 +128,7 @@ fn setup(mut commands: Commands, sim: Res<SimResource>) {
     }
 
     for unit in sim.world.units() {
-        commands.spawn((
-            Sprite::from_color(Color::srgb(0.76, 0.82, 0.64), Vec2::splat(TILE_SIZE * 0.45)),
-            Transform::from_translation(world_to_translation(unit.position, grid_size, 2.0)),
-            UnitVisual { id: unit.id },
-        ));
+        spawn_unit_visual(&mut commands, unit, grid_size);
     }
 }
 
@@ -201,6 +221,33 @@ fn move_input(
     }
 }
 
+fn apply_stress_hotkeys(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut sim: ResMut<SimResource>,
+    mut selection: ResMut<Selection>,
+) {
+    let worker_count = if keys.just_pressed(KeyCode::Digit1) {
+        Some(STRESS_PRESET_SMALL)
+    } else if keys.just_pressed(KeyCode::Digit2) {
+        Some(STRESS_PRESET_MEDIUM)
+    } else if keys.just_pressed(KeyCode::Digit3) {
+        Some(STRESS_PRESET_LARGE)
+    } else {
+        None
+    };
+
+    if let Some(worker_count) = worker_count {
+        sim.world.set_worker_count(worker_count);
+        selection.units.clear();
+    }
+
+    if keys.just_pressed(KeyCode::KeyR) {
+        sim.world = new_world();
+        sim.accumulator = 0.0;
+        selection.units.clear();
+    }
+}
+
 fn tick_simulation(time: Res<Time>, mut sim: ResMut<SimResource>) {
     sim.accumulator += time.delta_secs();
     while sim.accumulator >= SIM_TICK_SECONDS {
@@ -210,13 +257,27 @@ fn tick_simulation(time: Res<Time>, mut sim: ResMut<SimResource>) {
 }
 
 fn sync_unit_visuals(
+    mut commands: Commands,
     sim: Res<SimResource>,
     selection: Res<Selection>,
-    mut units: Query<(&UnitVisual, &mut Transform, &mut Sprite)>,
+    mut units: Query<(Entity, &UnitVisual, &mut Transform, &mut Sprite)>,
 ) {
     let grid_size = sim.world.grid_size();
+    let simulated_ids = sim
+        .world
+        .units()
+        .iter()
+        .map(|unit| unit.id)
+        .collect::<HashSet<_>>();
+    let mut visual_ids = HashSet::with_capacity(simulated_ids.len());
 
-    for (visual, mut transform, mut sprite) in &mut units {
+    for (entity, visual, mut transform, mut sprite) in &mut units {
+        if !simulated_ids.contains(&visual.id) {
+            commands.entity(entity).despawn();
+            continue;
+        }
+
+        visual_ids.insert(visual.id);
         let Some(unit) = sim.world.unit(visual.id) else {
             continue;
         };
@@ -228,15 +289,32 @@ fn sync_unit_visuals(
             Color::srgb(0.76, 0.82, 0.64)
         };
     }
+
+    for unit in sim.world.units() {
+        if !visual_ids.contains(&unit.id) {
+            spawn_unit_visual(&mut commands, unit, grid_size);
+        }
+    }
 }
 
-fn update_fps_text(diagnostics: Res<DiagnosticsStore>, mut query: Query<&mut Text, With<FpsText>>) {
+fn update_hud_text(
+    diagnostics: Res<DiagnosticsStore>,
+    sim: Res<SimResource>,
+    selection: Res<Selection>,
+    mut query: Query<&mut Text, With<HudText>>,
+) {
     let fps = diagnostics
         .get(&FrameTimeDiagnosticsPlugin::FPS)
         .and_then(bevy::diagnostic::Diagnostic::smoothed);
+    let stats = HudStats {
+        fps,
+        unit_count: sim.world.units().len(),
+        selected_count: selection.units.len(),
+        tick: sim.world.tick(),
+    };
 
     for mut text in &mut query {
-        text.0 = format_fps(fps);
+        text.0 = format_hud(stats);
     }
 }
 
@@ -309,8 +387,38 @@ fn bevy_to_world_point(position: Vec2, grid_size: GridSize) -> WorldPoint {
     )
 }
 
+fn new_world() -> GameWorld {
+    GameWorld::new(SimConfig::new(GRID_WIDTH, GRID_HEIGHT), SIM_SEED)
+}
+
+fn spawn_unit_visual(commands: &mut Commands, unit: &Unit, grid_size: GridSize) {
+    commands.spawn((
+        Sprite::from_color(unit_color(false), Vec2::splat(TILE_SIZE * 0.45)),
+        Transform::from_translation(world_to_translation(unit.position, grid_size, 2.0)),
+        UnitVisual { id: unit.id },
+    ));
+}
+
+fn unit_color(selected: bool) -> Color {
+    if selected {
+        Color::srgb(0.95, 0.86, 0.34)
+    } else {
+        Color::srgb(0.76, 0.82, 0.64)
+    }
+}
+
 fn format_fps(fps: Option<f64>) -> String {
     fps.map_or_else(|| "FPS: --".to_string(), |fps| format!("FPS: {fps:.1}"))
+}
+
+fn format_hud(stats: HudStats) -> String {
+    format!(
+        "{}\nUnits: {}\nSelected: {}\nTick: {}\nVSync: off\nHotkeys: 1=100 2=1000 3=5000 R=reset",
+        format_fps(stats.fps),
+        stats.unit_count,
+        stats.selected_count,
+        stats.tick
+    )
 }
 
 #[cfg(test)]
@@ -325,5 +433,20 @@ mod tests {
     #[test]
     fn fps_label_formats_smoothed_value() {
         assert_eq!(format_fps(Some(59.94)), "FPS: 59.9");
+    }
+
+    #[test]
+    fn hud_label_includes_performance_and_stress_stats() {
+        let stats = HudStats {
+            fps: Some(144.46),
+            unit_count: 1_000,
+            selected_count: 12,
+            tick: 42,
+        };
+
+        assert_eq!(
+            format_hud(stats),
+            "FPS: 144.5\nUnits: 1000\nSelected: 12\nTick: 42\nVSync: off\nHotkeys: 1=100 2=1000 3=5000 R=reset"
+        );
     }
 }
