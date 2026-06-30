@@ -76,15 +76,32 @@ final class GameViewController: UIViewController {
         navigationController?.setNavigationBarHidden(true, animated: false)
         installHud()
         installSettingsButton()
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        navigationController?.setNavigationBarHidden(true, animated: animated)
+        startHudDisplayLink()
+        applyFrameRate()
+        refreshHud()
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        stopHudDisplayLink()
+    }
+
+    private func startHudDisplayLink() {
+        guard displayLink == nil else {
+            return
+        }
 
         let displayLink = CADisplayLink(target: self, selector: #selector(refreshHud))
         displayLink.add(to: .main, forMode: .common)
         self.displayLink = displayLink
-        applyFrameRate()
     }
 
-    override func viewDidDisappear(_ animated: Bool) {
-        super.viewDidDisappear(animated)
+    private func stopHudDisplayLink() {
         displayLink?.invalidate()
         displayLink = nil
     }
@@ -122,8 +139,10 @@ final class GameViewController: UIViewController {
     }
 
     private func applyFrameRate() {
-        let preferredFrameRate = min(settings.targetFrameRate, UIScreen.main.maximumFramesPerSecond)
-        (view as? MTKView)?.preferredFramesPerSecond = preferredFrameRate
+        let preferredFrameRate = effectiveFrameRate
+        let metalView = view as? MTKView
+        metalView?.preferredFramesPerSecond = preferredFrameRate
+        metalView?.isPaused = false
         displayLink?.preferredFrameRateRange = CAFrameRateRange(
             minimum: 30,
             maximum: Float(preferredFrameRate),
@@ -131,8 +150,16 @@ final class GameViewController: UIViewController {
         )
     }
 
+    private var effectiveFrameRate: Int {
+        min(settings.targetFrameRate, UIScreen.main.maximumFramesPerSecond)
+    }
+
     @objc private func refreshHud() {
-        hudLabel.text = controller?.hudText()
+        let gameHudText = controller?.hudText() ?? ""
+        hudLabel.text = """
+        \(gameHudText)
+        Target FPS: \(settings.targetFrameRate)  Effective: \(effectiveFrameRate)
+        """
     }
 
     @objc private func openSettings() {

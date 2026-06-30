@@ -143,3 +143,19 @@ fn ios_shell_has_menu_settings_and_frame_rate_selection() {
     assert!(game_controller.contains("preferredFramesPerSecond"));
     assert!(game_controller.contains("preferredFrameRateRange"));
 }
+
+#[test]
+fn ios_frame_rate_setting_reapplies_after_returning_from_settings() {
+    let info_plist = include_str!("../apple/ios/AshenFrontierIOS/Info.plist");
+    let game_controller = include_str!("../apple/ios/AshenFrontierIOS/GameViewController.swift");
+
+    assert!(info_plist.contains("<key>CADisableMinimumFrameDurationOnPhone</key>"));
+    assert!(game_controller.contains("override func viewWillAppear"));
+    assert!(game_controller.contains("override func viewWillDisappear"));
+    assert!(game_controller.contains("startHudDisplayLink"));
+    assert!(game_controller.contains("stopHudDisplayLink"));
+    assert!(game_controller.contains("effectiveFrameRate"));
+    assert!(game_controller.contains("Target FPS"));
+    assert!(game_controller.contains("applyFrameRate()"));
+    assert!(!game_controller.contains("override func viewDidDisappear"));
+}
