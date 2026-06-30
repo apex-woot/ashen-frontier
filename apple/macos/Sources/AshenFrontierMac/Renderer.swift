@@ -2,25 +2,22 @@ import Metal
 import MetalKit
 import simd
 
-private let gridWidth: Float = 32.0
-private let gridHeight: Float = 24.0
-
 struct Vertex {
     var position: SIMD2<Float>
     var color: SIMD4<Float>
 }
 
 final class Renderer: NSObject, MTKViewDelegate {
-    private let world: RustWorld
+    private let controller: GameController
     private let commandQueue: MTLCommandQueue
     private let pipelineState: MTLRenderPipelineState
 
-    init(device: MTLDevice, colorPixelFormat: MTLPixelFormat, world: RustWorld) throws {
+    init(device: MTLDevice, colorPixelFormat: MTLPixelFormat, controller: GameController) throws {
         guard let commandQueue = device.makeCommandQueue() else {
             throw RendererError.missingCommandQueue
         }
 
-        self.world = world
+        self.controller = controller
         self.commandQueue = commandQueue
         self.pipelineState = try Self.makePipelineState(device: device, pixelFormat: colorPixelFormat)
         super.init()
@@ -36,7 +33,7 @@ final class Renderer: NSObject, MTKViewDelegate {
             return
         }
 
-        world.step(1)
+        controller.stepFrame()
         var vertices = makeSceneVertices()
 
         encoder.setRenderPipelineState(pipelineState)
@@ -93,16 +90,18 @@ final class Renderer: NSObject, MTKViewDelegate {
             to: &vertices
         )
 
-        for unit in world.units() {
+        for unit in controller.units() {
             appendQuad(
                 center: worldToClip(x: unit.x, y: unit.y),
                 halfSize: SIMD2<Float>(0.018, 0.024),
-                color: SIMD4<Float>(0.76, 0.82, 0.64, 1.0),
+                color: controller.isSelected(unitID: unit.id)
+                    ? SIMD4<Float>(0.95, 0.86, 0.34, 1.0)
+                    : SIMD4<Float>(0.76, 0.82, 0.64, 1.0),
                 to: &vertices
             )
         }
 
-        for enemy in world.enemies() {
+        for enemy in controller.enemies() {
             appendQuad(
                 center: worldToClip(x: enemy.x, y: enemy.y),
                 halfSize: SIMD2<Float>(0.016, 0.021),
@@ -113,13 +112,6 @@ final class Renderer: NSObject, MTKViewDelegate {
 
         return vertices
     }
-}
-
-private func worldToClip(x: Float, y: Float) -> SIMD2<Float> {
-    SIMD2<Float>(
-        (x / gridWidth) * 2.0 - 1.0,
-        (y / gridHeight) * 2.0 - 1.0
-    )
 }
 
 private func appendQuad(

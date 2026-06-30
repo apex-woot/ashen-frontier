@@ -1,4 +1,5 @@
 import AshenFrontierBridge
+import simd
 
 final class RustWorld {
     private let handle: OpaquePointer
@@ -24,6 +25,12 @@ final class RustWorld {
 
     func spawnHorde(count: UInt32) {
         af_world_spawn_horde(handle, count)
+    }
+
+    func moveUnits(ids: [UInt32], destination: SIMD2<Float>) -> UInt32 {
+        ids.withUnsafeBufferPointer { buffer in
+            af_world_move_units(handle, buffer.baseAddress, buffer.count, destination.x, destination.y)
+        }
     }
 
     func units() -> [AfEntityPosition] {

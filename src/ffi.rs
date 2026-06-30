@@ -1,6 +1,14 @@
 #![allow(clippy::not_unsafe_ptr_arg_deref)]
 
-use crate::sim::{Enemy, GameWorld, GridSize, Unit};
+use crate::sim::{CommandRejection, Enemy, GameWorld, GridSize, Unit, UnitId, WorldPoint};
+
+pub const AF_COMMAND_STATUS_ACCEPTED: u32 = 0;
+pub const AF_COMMAND_STATUS_EMPTY_SELECTION: u32 = 1;
+pub const AF_COMMAND_STATUS_DESTINATION_OUT_OF_BOUNDS: u32 = 2;
+pub const AF_COMMAND_STATUS_BLOCKED_DESTINATION: u32 = 3;
+pub const AF_COMMAND_STATUS_NO_PATH: u32 = 4;
+pub const AF_COMMAND_STATUS_UNKNOWN_UNIT: u32 = 5;
+pub const AF_COMMAND_STATUS_INVALID_UNIT_LIST: u32 = 100;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -50,6 +58,35 @@ pub extern "C" fn af_world_spawn_horde(world: *mut AfWorld, enemy_count: u32) {
     world
         .world
         .spawn_horde(usize::try_from(enemy_count).unwrap_or(usize::MAX));
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn af_world_move_units(
+    world: *mut AfWorld,
+    unit_ids: *const u32,
+    unit_count: usize,
+    destination_x: f32,
+    destination_y: f32,
+) -> u32 {
+    let Some(world) = world_mut(world) else {
+        return AF_COMMAND_STATUS_INVALID_UNIT_LIST;
+    };
+
+    if unit_ids.is_null() {
+        return AF_COMMAND_STATUS_INVALID_UNIT_LIST;
+    }
+
+    let unit_ids = unsafe { std::slice::from_raw_parts(unit_ids, unit_count) };
+    let units = unit_ids
+        .iter()
+        .copied()
+        .map(UnitId::new)
+        .collect::<Vec<_>>();
+
+    world
+        .world
+        .move_units(&units, WorldPoint::new(destination_x, destination_y))
+        .map_or_else(command_rejection_code, |()| AF_COMMAND_STATUS_ACCEPTED)
 }
 
 #[unsafe(no_mangle)]
@@ -134,6 +171,16 @@ fn enemy_position(enemy: &Enemy) -> AfEntityPosition {
         id: enemy.id.value(),
         x: enemy.position.x,
         y: enemy.position.y,
+    }
+}
+
+fn command_rejection_code(rejection: CommandRejection) -> u32 {
+    match rejection {
+        CommandRejection::EmptySelection => AF_COMMAND_STATUS_EMPTY_SELECTION,
+        CommandRejection::DestinationOutOfBounds => AF_COMMAND_STATUS_DESTINATION_OUT_OF_BOUNDS,
+        CommandRejection::BlockedDestination => AF_COMMAND_STATUS_BLOCKED_DESTINATION,
+        CommandRejection::NoPath => AF_COMMAND_STATUS_NO_PATH,
+        CommandRejection::UnknownUnit(_) => AF_COMMAND_STATUS_UNKNOWN_UNIT,
     }
 }
 

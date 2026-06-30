@@ -17,3 +17,5 @@ swift run AshenFrontierMac
 ```
 
 Open `apple/macos/Package.swift` in Xcode for Apple-side development.
+
+The current Apple shell is a macOS target. Use Xcode's `My Mac` destination for this slice; iOS simulator support comes next.
