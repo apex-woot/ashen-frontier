@@ -8,5 +8,5 @@ cd "$REPO_ROOT"
 tmp_header=$(mktemp)
 trap 'rm -f "$tmp_header"' EXIT
 
-cbindgen --config cbindgen.toml --crate . --output "$tmp_header"
+cbindgen --config cbindgen.toml --crate ashen-frontier --output "$tmp_header"
 cmp -s apple/macos/Sources/AshenFrontierBridge/include/ashen_frontier.h "$tmp_header"

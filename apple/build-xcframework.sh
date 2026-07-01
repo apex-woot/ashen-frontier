@@ -47,7 +47,7 @@ require_rust_target aarch64-apple-ios-sim
 require_rust_target x86_64-apple-ios
 require_rust_target aarch64-apple-ios
 
-cbindgen --config cbindgen.toml --crate . --output "$HEADER_DIR/ashen_frontier.h"
+cbindgen --config cbindgen.toml --crate ashen-frontier --output "$HEADER_DIR/ashen_frontier.h"
 
 build_staticlib aarch64-apple-darwin
 build_staticlib aarch64-apple-ios-sim
