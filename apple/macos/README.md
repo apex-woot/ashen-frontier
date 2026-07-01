@@ -7,6 +7,7 @@ This is the first Swift/Metal shell for the Rust simulation.
 From the repo root:
 
 ```sh
+cargo install cbindgen
 ./apple/macos/generate-headers.sh
 ./apple/macos/build-rust.sh
 cd apple/macos
@@ -19,6 +20,7 @@ Open `apple/macos/Package.swift` in Xcode for IDE work. Select the macOS destina
 ## Controls
 
 - `H`: spawn a 64-enemy horde through the Rust C ABI.
+- `4` / `5` / `6`: spawn a worker, ranger, or soldier.
 - Left click: select the nearest unit.
 - Right click: move the selected unit through the Rust C ABI.
 

@@ -3,6 +3,7 @@ import MetalKit
 
 final class GameView: MTKView {
     var spawnHorde: (() -> Void)?
+    var spawnUnit: ((UnitSpawnKind) -> Void)?
     var selectUnit: ((CGPoint, CGSize) -> Void)?
     var moveSelectedUnits: ((CGPoint, CGSize) -> Void)?
 
@@ -24,6 +25,12 @@ final class GameView: MTKView {
         switch event.charactersIgnoringModifiers?.lowercased() {
         case "h":
             spawnHorde?()
+        case "4":
+            spawnUnit?(.worker)
+        case "5":
+            spawnUnit?(.ranger)
+        case "6":
+            spawnUnit?(.soldier)
         default:
             super.keyDown(with: event)
         }

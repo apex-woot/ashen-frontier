@@ -1,11 +1,24 @@
 use std::collections::VecDeque;
 
 const STARTING_WORKERS: usize = 6;
-const WORKER_SPEED_PER_TICK: f32 = 1.5;
-const ENEMY_SPEED_PER_TICK: f32 = 0.9;
 const GROUP_MOVE_SPACING: f32 = 0.8;
 const SPATIAL_CHUNK_SIZE: u16 = 16;
+const SIM_SECONDS_PER_TICK: f32 = 0.1;
 const PATH_NEIGHBORS: [(i16, i16); 4] = [(1, 0), (0, 1), (-1, 0), (0, -1)];
+const PLAYER_SPAWN_OFFSETS: [(f32, f32); 12] = [
+    (2.0, 0.0),
+    (2.0, 1.0),
+    (1.0, 2.0),
+    (0.0, 2.0),
+    (-1.0, 2.0),
+    (-2.0, 1.0),
+    (-2.0, 0.0),
+    (-2.0, -1.0),
+    (-1.0, -2.0),
+    (0.0, -2.0),
+    (1.0, -2.0),
+    (2.0, -1.0),
+];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct GridSize {
@@ -101,11 +114,90 @@ impl UnitId {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AgentStats {
+    pub max_health: f32,
+    pub armor: f32,
+    pub attack_damage: f32,
+    pub attack_range: f32,
+    pub attacks_per_second: f32,
+    pub movement_speed_per_tick: f32,
+    pub vision_range: f32,
+    pub noise: f32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum UnitKind {
+    Worker,
+    Ranger,
+    Soldier,
+}
+
+impl UnitKind {
+    #[must_use]
+    pub const fn stats(self) -> AgentStats {
+        match self {
+            Self::Worker => AgentStats {
+                max_health: 60.0,
+                armor: 0.0,
+                attack_damage: 5.0,
+                attack_range: 3.0,
+                attacks_per_second: 1.0,
+                movement_speed_per_tick: 0.10,
+                vision_range: 6.0,
+                noise: 1.0,
+            },
+            Self::Ranger => AgentStats {
+                max_health: 60.0,
+                armor: 0.05,
+                attack_damage: 10.0,
+                attack_range: 6.0,
+                attacks_per_second: 1.0,
+                movement_speed_per_tick: 0.16,
+                vision_range: 8.0,
+                noise: 1.0,
+            },
+            Self::Soldier => AgentStats {
+                max_health: 120.0,
+                armor: 0.4,
+                attack_damage: 16.0,
+                attack_range: 5.0,
+                attacks_per_second: 2.0,
+                movement_speed_per_tick: 0.12,
+                vision_range: 6.0,
+                noise: 3.0,
+            },
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Unit {
     pub id: UnitId,
+    pub kind: UnitKind,
+    pub health: f32,
     pub position: WorldPoint,
+    attack_cooldown_ticks: u16,
     path: Vec<WorldPoint>,
+}
+
+impl Unit {
+    #[must_use]
+    pub fn new(id: UnitId, kind: UnitKind, position: WorldPoint) -> Self {
+        Self {
+            id,
+            kind,
+            health: kind.stats().max_health,
+            position,
+            attack_cooldown_ticks: 0,
+            path: Vec::new(),
+        }
+    }
+
+    #[must_use]
+    pub const fn stats(&self) -> AgentStats {
+        self.kind.stats()
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -123,11 +215,56 @@ impl EnemyId {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum EnemyKind {
+    InfectedDecrepit,
+}
+
+impl EnemyKind {
+    #[must_use]
+    pub const fn stats(self) -> AgentStats {
+        match self {
+            Self::InfectedDecrepit => AgentStats {
+                max_health: 35.0,
+                armor: 0.0,
+                attack_damage: 5.0,
+                attack_range: 0.8,
+                attacks_per_second: 0.8,
+                movement_speed_per_tick: 0.06,
+                vision_range: 4.0,
+                noise: 0.0,
+            },
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Enemy {
     pub id: EnemyId,
+    pub kind: EnemyKind,
+    pub health: f32,
     pub position: WorldPoint,
+    attack_cooldown_ticks: u16,
     path: Vec<WorldPoint>,
+}
+
+impl Enemy {
+    #[must_use]
+    pub fn new(id: EnemyId, kind: EnemyKind, position: WorldPoint) -> Self {
+        Self {
+            id,
+            kind,
+            health: kind.stats().max_health,
+            position,
+            attack_cooldown_ticks: 0,
+            path: Vec::new(),
+        }
+    }
+
+    #[must_use]
+    pub const fn stats(&self) -> AgentStats {
+        self.kind.stats()
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -337,6 +474,7 @@ pub struct GameWorld {
     tick: u64,
     units: Vec<Unit>,
     enemies: Vec<Enemy>,
+    next_unit_id: u32,
     next_enemy_id: u32,
     buildings: Vec<Building>,
     terrain: Vec<TerrainCell>,
@@ -352,6 +490,7 @@ impl GameWorld {
             tick: 0,
             units: Vec::with_capacity(STARTING_WORKERS),
             enemies: Vec::new(),
+            next_unit_id: 1,
             next_enemy_id: 1,
             buildings: vec![Building { position: center }],
             terrain: vec![TerrainCell::Clear; grid_size.cell_count()],
@@ -359,6 +498,7 @@ impl GameWorld {
         };
 
         world.spawn_starting_workers(center);
+        world.next_unit_id = u32::try_from(STARTING_WORKERS + 1).unwrap_or(u32::MAX);
         world.rebuild_unit_spatial_index();
         world
     }
@@ -451,18 +591,12 @@ impl GameWorld {
 
     #[must_use]
     pub fn unit(&self, id: UnitId) -> Option<&Unit> {
-        let index =
-            id.0.checked_sub(1)
-                .and_then(|value| usize::try_from(value).ok())?;
-        self.units.get(index).filter(|unit| unit.id == id)
+        self.units.iter().find(|unit| unit.id == id)
     }
 
     #[must_use]
     pub fn enemy(&self, id: EnemyId) -> Option<&Enemy> {
-        let index =
-            id.0.checked_sub(1)
-                .and_then(|value| usize::try_from(value).ok())?;
-        self.enemies.get(index).filter(|enemy| enemy.id == id)
+        self.enemies.iter().find(|enemy| enemy.id == id)
     }
 
     #[must_use]
@@ -559,17 +693,28 @@ impl GameWorld {
             let position = horde_spawn_position(spawn_index, self.grid_size);
             let path = find_path(position, target, &self.terrain, self.grid_size);
 
-            self.enemies.push(Enemy {
-                id,
-                position,
-                path: path.unwrap_or_default(),
-            });
+            let mut enemy = Enemy::new(id, EnemyKind::InfectedDecrepit, position);
+            enemy.path = path.unwrap_or_default();
+            self.enemies.push(enemy);
         }
+    }
+
+    #[must_use]
+    pub fn spawn_unit_near_command_center(&mut self, kind: UnitKind) -> Option<UnitId> {
+        let center = self.command_center_target()?;
+        let position =
+            player_spawn_position(center, self.units.len(), self.grid_size, &self.terrain)?;
+        let id = UnitId::new(self.next_unit_id);
+        self.next_unit_id = self.next_unit_id.saturating_add(1);
+        self.units.push(Unit::new(id, kind, position));
+        self.rebuild_unit_spatial_index();
+        Some(id)
     }
 
     pub fn step(&mut self, steps: u32) {
         for _ in 0..steps {
             self.tick = self.tick.saturating_add(1);
+            self.resolve_combat();
             for unit in &mut self.units {
                 move_unit_toward_target(unit, &self.terrain, self.grid_size);
             }
@@ -582,6 +727,7 @@ impl GameWorld {
 
     pub fn set_worker_count(&mut self, worker_count: usize) {
         self.units.clear();
+        self.next_unit_id = u32::try_from(worker_count.saturating_add(1)).unwrap_or(u32::MAX);
 
         let width = usize::from(self.grid_size.width);
         let height = usize::from(self.grid_size.height);
@@ -600,11 +746,11 @@ impl GameWorld {
             let jitter_x = stress_jitter(lap % 4);
             let jitter_y = stress_jitter((lap / 4) % 4);
 
-            self.units.push(Unit {
-                id: UnitId::new(u32::try_from(index + 1).unwrap_or(u32::MAX)),
-                position: WorldPoint::new(f32::from(x) + jitter_x, f32::from(y) + jitter_y),
-                path: Vec::new(),
-            });
+            self.units.push(Unit::new(
+                UnitId::new(u32::try_from(index + 1).unwrap_or(u32::MAX)),
+                UnitKind::Worker,
+                WorldPoint::new(f32::from(x) + jitter_x, f32::from(y) + jitter_y),
+            ));
         }
         self.rebuild_unit_spatial_index();
     }
@@ -620,14 +766,14 @@ impl GameWorld {
         ];
 
         for (index, (x_offset, y_offset)) in OFFSETS.into_iter().enumerate() {
-            self.units.push(Unit {
-                id: UnitId::new(u32::try_from(index + 1).expect("starting worker id fits in u32")),
-                position: WorldPoint::new(
+            self.units.push(Unit::new(
+                UnitId::new(u32::try_from(index + 1).expect("starting worker id fits in u32")),
+                UnitKind::Worker,
+                WorldPoint::new(
                     f32::from(center.x) + x_offset,
                     f32::from(center.y) + y_offset,
                 ),
-                path: Vec::new(),
-            });
+            ));
         }
     }
 
@@ -671,16 +817,145 @@ impl GameWorld {
     }
 
     fn unit_mut(&mut self, id: UnitId) -> Option<&mut Unit> {
-        let index =
-            id.0.checked_sub(1)
-                .and_then(|value| usize::try_from(value).ok())?;
-        self.units.get_mut(index).filter(|unit| unit.id == id)
+        self.units.iter_mut().find(|unit| unit.id == id)
     }
 
     fn rebuild_unit_spatial_index(&mut self) {
         self.unit_chunks
             .rebuild(self.units.iter().map(|unit| (unit.id, unit.position)));
     }
+
+    fn resolve_combat(&mut self) {
+        tick_unit_cooldowns(&mut self.units);
+        tick_enemy_cooldowns(&mut self.enemies);
+
+        let mut enemy_damage = vec![0.0; self.enemies.len()];
+        for unit in &mut self.units {
+            if unit.attack_cooldown_ticks > 0 {
+                continue;
+            }
+            let Some(enemy_index) = nearest_enemy_in_range(unit, &self.enemies) else {
+                continue;
+            };
+
+            let enemy = &self.enemies[enemy_index];
+            enemy_damage[enemy_index] +=
+                armor_reduced_damage(unit.stats().attack_damage, enemy.stats().armor);
+            unit.attack_cooldown_ticks = attack_cooldown_ticks(unit.stats());
+        }
+
+        let mut unit_damage = vec![0.0; self.units.len()];
+        for enemy in &mut self.enemies {
+            if enemy.attack_cooldown_ticks > 0 {
+                continue;
+            }
+            let Some(unit_index) = nearest_unit_in_range(enemy, &self.units) else {
+                continue;
+            };
+
+            let unit = &self.units[unit_index];
+            unit_damage[unit_index] +=
+                armor_reduced_damage(enemy.stats().attack_damage, unit.stats().armor);
+            enemy.attack_cooldown_ticks = attack_cooldown_ticks(enemy.stats());
+        }
+
+        for (enemy, damage) in self.enemies.iter_mut().zip(enemy_damage) {
+            enemy.health -= damage;
+        }
+        for (unit, damage) in self.units.iter_mut().zip(unit_damage) {
+            unit.health -= damage;
+        }
+
+        self.enemies.retain(|enemy| enemy.health > 0.0);
+        self.units.retain(|unit| unit.health > 0.0);
+    }
+}
+
+fn tick_unit_cooldowns(units: &mut [Unit]) {
+    for unit in units {
+        unit.attack_cooldown_ticks = unit.attack_cooldown_ticks.saturating_sub(1);
+    }
+}
+
+fn tick_enemy_cooldowns(enemies: &mut [Enemy]) {
+    for enemy in enemies {
+        enemy.attack_cooldown_ticks = enemy.attack_cooldown_ticks.saturating_sub(1);
+    }
+}
+
+fn nearest_enemy_in_range(unit: &Unit, enemies: &[Enemy]) -> Option<usize> {
+    nearest_target_in_range(
+        unit.position,
+        unit.stats().attack_range,
+        enemies.iter().map(|enemy| enemy.position),
+    )
+}
+
+fn nearest_unit_in_range(enemy: &Enemy, units: &[Unit]) -> Option<usize> {
+    nearest_target_in_range(
+        enemy.position,
+        enemy.stats().attack_range,
+        units.iter().map(|unit| unit.position),
+    )
+}
+
+fn nearest_target_in_range(
+    attacker_position: WorldPoint,
+    attack_range: f32,
+    targets: impl Iterator<Item = WorldPoint>,
+) -> Option<usize> {
+    targets
+        .enumerate()
+        .filter_map(|(index, position)| {
+            let distance = distance(attacker_position, position);
+            (distance <= attack_range).then_some((index, distance))
+        })
+        .min_by(|first, second| first.1.total_cmp(&second.1))
+        .map(|(index, _)| index)
+}
+
+fn attack_cooldown_ticks(stats: AgentStats) -> u16 {
+    if stats.attacks_per_second <= 0.0 {
+        return u16::MAX;
+    }
+
+    let ticks = (1.0 / stats.attacks_per_second / SIM_SECONDS_PER_TICK).ceil();
+    bounded_floor_to_u16(ticks.max(1.0))
+}
+
+fn armor_reduced_damage(damage: f32, armor: f32) -> f32 {
+    damage * (1.0 - armor).clamp(0.0, 1.0)
+}
+
+fn player_spawn_position(
+    center: WorldPoint,
+    spawn_index: usize,
+    grid_size: GridSize,
+    terrain: &[TerrainCell],
+) -> Option<WorldPoint> {
+    for offset_index in 0..PLAYER_SPAWN_OFFSETS.len() {
+        let (x_offset, y_offset) =
+            PLAYER_SPAWN_OFFSETS[(spawn_index + offset_index) % PLAYER_SPAWN_OFFSETS.len()];
+        let position = WorldPoint::new(center.x + x_offset, center.y + y_offset);
+        if contains_world_point(position, grid_size)
+            && !is_point_blocked(position, terrain, grid_size)
+        {
+            return Some(position);
+        }
+    }
+
+    if contains_world_point(center, grid_size) && !is_point_blocked(center, terrain, grid_size) {
+        return Some(center);
+    }
+
+    None
+}
+
+fn contains_world_point(point: WorldPoint, grid_size: GridSize) -> bool {
+    point.x >= 0.0
+        && point.y >= 0.0
+        && point.x < f32::from(grid_size.width)
+        && point.y < f32::from(grid_size.height)
 }
 
 fn stress_jitter(slot: usize) -> f32 {
@@ -755,20 +1030,22 @@ fn append_formation_target(
 }
 
 fn move_unit_toward_target(unit: &mut Unit, terrain: &[TerrainCell], grid_size: GridSize) {
+    let speed = unit.stats().movement_speed_per_tick;
     move_agent_toward_target(
         &mut unit.position,
         &mut unit.path,
-        WORKER_SPEED_PER_TICK,
+        speed,
         terrain,
         grid_size,
     );
 }
 
 fn move_enemy_toward_target(enemy: &mut Enemy, terrain: &[TerrainCell], grid_size: GridSize) {
+    let speed = enemy.stats().movement_speed_per_tick;
     move_agent_toward_target(
         &mut enemy.position,
         &mut enemy.path,
-        ENEMY_SPEED_PER_TICK,
+        speed,
         terrain,
         grid_size,
     );
@@ -911,6 +1188,10 @@ fn is_coord_blocked(coord: GridCoord, terrain: &[TerrainCell], grid_size: GridSi
     terrain.get(index).copied() == Some(TerrainCell::Blocked)
 }
 
+fn distance(first: WorldPoint, second: WorldPoint) -> f32 {
+    world_distance(first.x - second.x, first.y - second.y)
+}
+
 fn world_point_to_grid(point: WorldPoint, grid_size: GridSize) -> Option<GridCoord> {
     if point.x < 0.0
         || point.y < 0.0
@@ -977,6 +1258,75 @@ mod tests {
     }
 
     #[test]
+    fn starting_workers_spawn_with_worker_stats() {
+        let world = test_world();
+
+        for unit in world.units() {
+            assert_eq!(unit.kind, UnitKind::Worker);
+            assert_approx_eq(unit.health, UnitKind::Worker.stats().max_health);
+            assert_eq!(unit.stats(), UnitKind::Worker.stats());
+            assert_approx_eq(unit.stats().movement_speed_per_tick, 0.10);
+            assert!(unit.stats().attack_damage > 0.0);
+            assert!(unit.stats().attack_range > 0.0);
+        }
+    }
+
+    #[test]
+    fn player_units_can_be_spawned_near_the_command_center() {
+        let mut world = test_world();
+
+        let spawned_id = world
+            .spawn_unit_near_command_center(UnitKind::Ranger)
+            .expect("spawn near command center should succeed");
+
+        let spawned = world.unit(spawned_id).expect("spawned unit should exist");
+        assert_eq!(world.units().len(), STARTING_WORKERS + 1);
+        assert_eq!(spawned.id, UnitId::new(7));
+        assert_eq!(spawned.kind, UnitKind::Ranger);
+        assert_approx_eq(spawned.health, UnitKind::Ranger.stats().max_health);
+        assert!(distance(spawned.position, WorldPoint::new(16.5, 12.5)) <= 3.0);
+    }
+
+    #[test]
+    fn units_attack_enemies_in_range_and_remove_dead_enemies() {
+        let mut world = GameWorld::new(GridSize::new(8, 8));
+        world.units = vec![Unit::new(
+            UnitId::new(1),
+            UnitKind::Soldier,
+            WorldPoint::new(3.5, 3.5),
+        )];
+        world.enemies = vec![Enemy::new(
+            EnemyId::new(1),
+            EnemyKind::InfectedDecrepit,
+            WorldPoint::new(4.2, 3.5),
+        )];
+
+        world.step(12);
+
+        assert!(world.enemies().is_empty());
+        assert_eq!(world.units().len(), 1);
+        assert!(world.unit(UnitId::new(1)).unwrap().health < UnitKind::Soldier.stats().max_health);
+    }
+
+    #[test]
+    fn enemies_attack_units_in_range_and_remove_dead_units() {
+        let mut world = GameWorld::new(GridSize::new(8, 8));
+        let mut worker = Unit::new(UnitId::new(1), UnitKind::Worker, WorldPoint::new(3.5, 3.5));
+        worker.health = 5.0;
+        world.units = vec![worker];
+        world.enemies = vec![Enemy::new(
+            EnemyId::new(1),
+            EnemyKind::InfectedDecrepit,
+            WorldPoint::new(4.0, 3.5),
+        )];
+
+        world.step(1);
+
+        assert!(world.units().is_empty());
+        assert_eq!(world.enemies().len(), 1);
+    }
+
+    #[test]
     fn accepted_move_advances_units_on_fixed_tick() {
         let mut world = test_world();
         let unit_id = world.units()[0].id;
@@ -1035,7 +1385,7 @@ mod tests {
     }
 
     #[test]
-    fn selection_uses_world_space_rectangle_without_bevy_types() {
+    fn selection_uses_world_space_rectangle() {
         let world = test_world();
 
         let selected = world.select_units(WorldRect::from_corners(
@@ -1092,7 +1442,7 @@ mod tests {
             world.move_units(&[unit_id], WorldPoint::new(start.x + 3.2, start.y + 0.2)),
             Ok(())
         );
-        world.step(20);
+        world.step(60);
 
         let unit = world.unit(unit_id).expect("unit should still exist");
         assert!((unit.position.x - (start.x + 3.2)).abs() < 0.01);
@@ -1130,9 +1480,41 @@ mod tests {
 
         assert_eq!(world.enemies().len(), 8);
         for enemy in world.enemies() {
+            assert_eq!(enemy.kind, EnemyKind::InfectedDecrepit);
+            assert_approx_eq(enemy.health, EnemyKind::InfectedDecrepit.stats().max_health);
+            assert_eq!(enemy.stats(), EnemyKind::InfectedDecrepit.stats());
+            assert_approx_eq(enemy.stats().movement_speed_per_tick, 0.06);
+            assert!(enemy.stats().attack_damage > 0.0);
             assert!(is_edge_position(enemy.position, world.grid_size()));
             assert!(enemy.path.contains(&WorldPoint::new(16.5, 12.5)));
         }
+    }
+
+    #[test]
+    fn movement_uses_unit_and_enemy_stats() {
+        let terrain = vec![TerrainCell::Clear; GridSize::new(8, 1).cell_count()];
+        let mut unit = Unit {
+            id: UnitId::new(1),
+            kind: UnitKind::Worker,
+            health: UnitKind::Worker.stats().max_health,
+            position: WorldPoint::new(0.5, 0.5),
+            attack_cooldown_ticks: 0,
+            path: vec![WorldPoint::new(4.5, 0.5)],
+        };
+        let mut enemy = Enemy {
+            id: EnemyId::new(1),
+            kind: EnemyKind::InfectedDecrepit,
+            health: EnemyKind::InfectedDecrepit.stats().max_health,
+            position: WorldPoint::new(0.5, 0.5),
+            attack_cooldown_ticks: 0,
+            path: vec![WorldPoint::new(4.5, 0.5)],
+        };
+
+        move_unit_toward_target(&mut unit, &terrain, GridSize::new(8, 1));
+        move_enemy_toward_target(&mut enemy, &terrain, GridSize::new(8, 1));
+
+        assert!((unit.position.x - 0.6).abs() < f32::EPSILON);
+        assert!((enemy.position.x - 0.56).abs() < f32::EPSILON);
     }
 
     #[test]
@@ -1227,5 +1609,12 @@ mod tests {
 
     fn distance(first: WorldPoint, second: WorldPoint) -> f32 {
         world_distance(first.x - second.x, first.y - second.y)
+    }
+
+    fn assert_approx_eq(actual: f32, expected: f32) {
+        assert!(
+            (actual - expected).abs() < f32::EPSILON,
+            "expected {actual} to equal {expected}"
+        );
     }
 }

@@ -1,10 +1,13 @@
+import AshenFrontierBridge
 import Metal
 import MetalKit
 import simd
 
 struct Vertex {
     var position: SIMD2<Float>
+    var worldPosition: SIMD2<Float>
     var color: SIMD4<Float>
+    var material: Float
 }
 
 final class Renderer: NSObject, MTKViewDelegate {
@@ -16,6 +19,9 @@ final class Renderer: NSObject, MTKViewDelegate {
     private let pipelineState: MTLRenderPipelineState
     private var vertexBuffer: MTLBuffer?
     private var vertexBufferLength = 0
+    private var sceneVertices: [Vertex] = []
+    private var unitPositions: [AfEntityPosition] = []
+    private var enemyPositions: [AfEntityPosition] = []
 
     init(device: MTLDevice, colorPixelFormat: MTLPixelFormat, controller: GameController) throws {
         guard let commandQueue = device.makeCommandQueue() else {
@@ -41,14 +47,15 @@ final class Renderer: NSObject, MTKViewDelegate {
 
         controller.stepFrame()
         let viewport = controller.viewport(for: view.bounds.size)
-        let vertices = makeSceneVertices(viewport: viewport)
-        guard let vertexBuffer = prepareVertexBuffer(for: vertices) else {
+        sceneVertices.removeAll(keepingCapacity: true)
+        makeSceneVertices(viewport: viewport, into: &sceneVertices)
+        guard let vertexBuffer = prepareVertexBuffer(for: sceneVertices) else {
             return
         }
 
         encoder.setRenderPipelineState(pipelineState)
         encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
-        encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: vertices.count)
+        encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: sceneVertices.count)
         encoder.endEncoding()
         commandBuffer.present(drawable)
         commandBuffer.commit()
@@ -94,9 +101,15 @@ final class Renderer: NSObject, MTKViewDelegate {
         descriptor.attributes[0].format = .float2
         descriptor.attributes[0].offset = 0
         descriptor.attributes[0].bufferIndex = 0
-        descriptor.attributes[1].format = .float4
+        descriptor.attributes[1].format = .float2
         descriptor.attributes[1].offset = MemoryLayout<SIMD2<Float>>.stride
         descriptor.attributes[1].bufferIndex = 0
+        descriptor.attributes[2].format = .float4
+        descriptor.attributes[2].offset = MemoryLayout<SIMD2<Float>>.stride * 2
+        descriptor.attributes[2].bufferIndex = 0
+        descriptor.attributes[3].format = .float
+        descriptor.attributes[3].offset = MemoryLayout<SIMD2<Float>>.stride * 2 + MemoryLayout<SIMD4<Float>>.stride
+        descriptor.attributes[3].bufferIndex = 0
         descriptor.layouts[0].stride = MemoryLayout<Vertex>.stride
         descriptor.layouts[0].stepFunction = .perVertex
         return descriptor
@@ -141,19 +154,28 @@ final class Renderer: NSObject, MTKViewDelegate {
         return newBuffer
     }
 
-    private func makeSceneVertices(viewport: ViewportTransform) -> [Vertex] {
-        var vertices: [Vertex] = []
-        appendQuad(
-            center: viewport.worldToClip(x: 16.5, y: 12.5),
-            halfSize: viewport.worldHalfSizeToClip(SIMD2<Float>(0.72, 0.72)),
-            color: SIMD4<Float>(0.12, 0.34, 0.42, 1.0),
+    private func makeSceneVertices(viewport: ViewportTransform, into vertices: inout [Vertex]) {
+        let unitCount = controller.readUnits(into: &unitPositions)
+        let enemyCount = controller.readEnemies(into: &enemyPositions)
+        vertices.reserveCapacity(6 + ((unitCount + enemyCount) * 6))
+
+        appendTerrainQuad(
+            worldSize: controller.worldSize,
+            viewport: viewport,
             to: &vertices
         )
 
-        for unit in controller.units() {
+        for unit in unitPositions {
+            let worldCenter = SIMD2<Float>(unit.x, unit.y)
+            let halfSize = SIMD2<Float>(0.29, 0.29)
+            guard viewport.isWorldRectVisible(center: worldCenter, halfSize: halfSize) else {
+                continue
+            }
+
             appendQuad(
                 center: viewport.worldToClip(x: unit.x, y: unit.y),
-                halfSize: viewport.worldHalfSizeToClip(SIMD2<Float>(0.29, 0.29)),
+                halfSize: viewport.worldHalfSizeToClip(halfSize),
+                worldCenter: worldCenter,
                 color: controller.isSelected(unitID: unit.id)
                     ? SIMD4<Float>(0.95, 0.86, 0.34, 1.0)
                     : SIMD4<Float>(0.76, 0.82, 0.64, 1.0),
@@ -161,22 +183,54 @@ final class Renderer: NSObject, MTKViewDelegate {
             )
         }
 
-        for enemy in controller.enemies() {
+        for enemy in enemyPositions {
+            let worldCenter = SIMD2<Float>(enemy.x, enemy.y)
+            let halfSize = SIMD2<Float>(0.26, 0.26)
+            guard viewport.isWorldRectVisible(center: worldCenter, halfSize: halfSize) else {
+                continue
+            }
+
             appendQuad(
                 center: viewport.worldToClip(x: enemy.x, y: enemy.y),
-                halfSize: viewport.worldHalfSizeToClip(SIMD2<Float>(0.26, 0.26)),
-                color: SIMD4<Float>(0.78, 0.18, 0.16, 1.0),
+                halfSize: viewport.worldHalfSizeToClip(halfSize),
+                worldCenter: worldCenter,
+                color: controller.isFocused(enemyID: enemy.id)
+                    ? SIMD4<Float>(1.00, 0.48, 0.20, 1.0)
+                    : SIMD4<Float>(0.78, 0.18, 0.16, 1.0),
                 to: &vertices
             )
         }
-
-        return vertices
     }
+}
+
+private func appendTerrainQuad(
+    worldSize: SIMD2<Float>,
+    viewport: ViewportTransform,
+    to vertices: inout [Vertex]
+) {
+    let bottomLeftWorld = SIMD2<Float>(0, 0)
+    let bottomRightWorld = SIMD2<Float>(worldSize.x, 0)
+    let topLeftWorld = SIMD2<Float>(0, worldSize.y)
+    let topRightWorld = worldSize
+
+    let bottomLeft = viewport.worldToClip(x: bottomLeftWorld.x, y: bottomLeftWorld.y)
+    let bottomRight = viewport.worldToClip(x: bottomRightWorld.x, y: bottomRightWorld.y)
+    let topLeft = viewport.worldToClip(x: topLeftWorld.x, y: topLeftWorld.y)
+    let topRight = viewport.worldToClip(x: topRightWorld.x, y: topRightWorld.y)
+    let color = SIMD4<Float>(0.14, 0.22, 0.18, 1.0)
+
+    vertices.append(Vertex(position: topLeft, worldPosition: topLeftWorld, color: color, material: 0))
+    vertices.append(Vertex(position: bottomLeft, worldPosition: bottomLeftWorld, color: color, material: 0))
+    vertices.append(Vertex(position: topRight, worldPosition: topRightWorld, color: color, material: 0))
+    vertices.append(Vertex(position: topRight, worldPosition: topRightWorld, color: color, material: 0))
+    vertices.append(Vertex(position: bottomLeft, worldPosition: bottomLeftWorld, color: color, material: 0))
+    vertices.append(Vertex(position: bottomRight, worldPosition: bottomRightWorld, color: color, material: 0))
 }
 
 private func appendQuad(
     center: SIMD2<Float>,
     halfSize: SIMD2<Float>,
+    worldCenter: SIMD2<Float>,
     color: SIMD4<Float>,
     to vertices: inout [Vertex]
 ) {
@@ -185,12 +239,12 @@ private func appendQuad(
     let bottomLeft = SIMD2<Float>(center.x - halfSize.x, center.y - halfSize.y)
     let bottomRight = SIMD2<Float>(center.x + halfSize.x, center.y - halfSize.y)
 
-    vertices.append(Vertex(position: topLeft, color: color))
-    vertices.append(Vertex(position: bottomLeft, color: color))
-    vertices.append(Vertex(position: topRight, color: color))
-    vertices.append(Vertex(position: topRight, color: color))
-    vertices.append(Vertex(position: bottomLeft, color: color))
-    vertices.append(Vertex(position: bottomRight, color: color))
+    vertices.append(Vertex(position: topLeft, worldPosition: worldCenter, color: color, material: 1))
+    vertices.append(Vertex(position: bottomLeft, worldPosition: worldCenter, color: color, material: 1))
+    vertices.append(Vertex(position: topRight, worldPosition: worldCenter, color: color, material: 1))
+    vertices.append(Vertex(position: topRight, worldPosition: worldCenter, color: color, material: 1))
+    vertices.append(Vertex(position: bottomLeft, worldPosition: worldCenter, color: color, material: 1))
+    vertices.append(Vertex(position: bottomRight, worldPosition: worldCenter, color: color, material: 1))
 }
 
 enum RendererError: Error {

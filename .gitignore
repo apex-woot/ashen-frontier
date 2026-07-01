@@ -4,3 +4,5 @@
 .DS_Store
 **/*.xcodeproj/project.xcworkspace/
 **/*.xcodeproj/xcuserdata/
+*.trace/
+*.xcresult/

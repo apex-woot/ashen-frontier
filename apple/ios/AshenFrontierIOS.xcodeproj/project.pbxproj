@@ -13,13 +13,11 @@
 		AF0100040000000000000001 /* RustWorld.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF0200040000000000000001 /* RustWorld.swift */; };
 		AF0100050000000000000001 /* GameController.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF0200050000000000000001 /* GameController.swift */; };
 		AF0100060000000000000001 /* Renderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF0200060000000000000001 /* Renderer.swift */; };
-		AF0100070000000000000001 /* AshenShaders.metal in Sources */ = {isa = PBXBuildFile; fileRef = AF0200070000000000000001 /* AshenShaders.metal */; };
-		AF0100080000000000000001 /* AshenFrontierRust.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = AF0200080000000000000001 /* AshenFrontierRust.xcframework */; };
+		AF0100070000000000000001 /* Shaders/AshenShaders.metal in Sources */ = {isa = PBXBuildFile; fileRef = AF0200070000000000000001 /* Shaders/AshenShaders.metal */; };
+		AF0100080000000000000001 /* ../../target/apple/AshenFrontierRust.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = AF0200080000000000000001 /* ../../target/apple/AshenFrontierRust.xcframework */; };
 		AF0100090000000000000001 /* Metal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = AF0200090000000000000001 /* Metal.framework */; };
 		AF01000A0000000000000001 /* MetalKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = AF02000A0000000000000001 /* MetalKit.framework */; };
-		AF01000B0000000000000001 /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF02000D0000000000000001 /* AppSettings.swift */; };
 		AF01000C0000000000000001 /* MainMenuViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF02000E0000000000000001 /* MainMenuViewController.swift */; };
-		AF01000D0000000000000001 /* SettingsViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF02000F0000000000000001 /* SettingsViewController.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -29,15 +27,13 @@
 		AF0200040000000000000001 /* RustWorld.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RustWorld.swift; sourceTree = "<group>"; };
 		AF0200050000000000000001 /* GameController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameController.swift; sourceTree = "<group>"; };
 		AF0200060000000000000001 /* Renderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Renderer.swift; sourceTree = "<group>"; };
-		AF0200070000000000000001 /* AshenShaders.metal */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; path = Shaders/AshenShaders.metal; sourceTree = "<group>"; };
-		AF0200080000000000000001 /* AshenFrontierRust.xcframework */ = {isa = PBXFileReference; explicitFileType = wrapper.xcframework; includeInIndex = 0; path = ../../target/apple/AshenFrontierRust.xcframework; sourceTree = "<group>"; };
+		AF0200070000000000000001 /* Shaders/AshenShaders.metal */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; path = Shaders/AshenShaders.metal; sourceTree = "<group>"; };
+		AF0200080000000000000001 /* ../../target/apple/AshenFrontierRust.xcframework */ = {isa = PBXFileReference; explicitFileType = wrapper.xcframework; includeInIndex = 0; path = ../../target/apple/AshenFrontierRust.xcframework; sourceTree = "<group>"; };
 		AF0200090000000000000001 /* Metal.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Metal.framework; path = System/Library/Frameworks/Metal.framework; sourceTree = SDKROOT; };
 		AF02000A0000000000000001 /* MetalKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MetalKit.framework; path = System/Library/Frameworks/MetalKit.framework; sourceTree = SDKROOT; };
 		AF02000B0000000000000001 /* AshenFrontierIOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AshenFrontierIOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		AF02000C0000000000000001 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-		AF02000D0000000000000001 /* AppSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettings.swift; sourceTree = "<group>"; };
 		AF02000E0000000000000001 /* MainMenuViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainMenuViewController.swift; sourceTree = "<group>"; };
-		AF02000F0000000000000001 /* SettingsViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsViewController.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -45,7 +41,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				AF0100080000000000000001 /* AshenFrontierRust.xcframework in Frameworks */,
+				AF0100080000000000000001 /* ../../target/apple/AshenFrontierRust.xcframework in Frameworks */,
 				AF0100090000000000000001 /* Metal.framework in Frameworks */,
 				AF01000A0000000000000001 /* MetalKit.framework in Frameworks */,
 			);
@@ -58,7 +54,7 @@
 			isa = PBXGroup;
 			children = (
 				AF0400020000000000000001 /* AshenFrontierIOS */,
-				AF0400030000000000000001 /* Shared Apple Sources */,
+				AF0400030000000000000001 /* ../macos/Sources/AshenFrontierMac */,
 				AF0400040000000000000001 /* Frameworks */,
 				AF0400050000000000000001 /* Products */,
 			);
@@ -66,25 +62,23 @@
 		};
 		AF0400020000000000000001 /* AshenFrontierIOS */ = {
 			isa = PBXGroup;
-			children = (
-				AF0200010000000000000001 /* AppDelegate.swift */,
-				AF02000D0000000000000001 /* AppSettings.swift */,
-				AF0200020000000000000001 /* GameView.swift */,
-				AF0200030000000000000001 /* GameViewController.swift */,
-				AF02000E0000000000000001 /* MainMenuViewController.swift */,
-				AF02000F0000000000000001 /* SettingsViewController.swift */,
-				AF02000C0000000000000001 /* Info.plist */,
-			);
+				children = (
+					AF0200010000000000000001 /* AppDelegate.swift */,
+					AF0200020000000000000001 /* GameView.swift */,
+					AF0200030000000000000001 /* GameViewController.swift */,
+					AF02000E0000000000000001 /* MainMenuViewController.swift */,
+					AF02000C0000000000000001 /* Info.plist */,
+				);
 			path = AshenFrontierIOS;
 			sourceTree = "<group>";
 		};
-		AF0400030000000000000001 /* Shared Apple Sources */ = {
+		AF0400030000000000000001 /* ../macos/Sources/AshenFrontierMac */ = {
 			isa = PBXGroup;
 			children = (
 				AF0200040000000000000001 /* RustWorld.swift */,
 				AF0200050000000000000001 /* GameController.swift */,
 				AF0200060000000000000001 /* Renderer.swift */,
-				AF0200070000000000000001 /* AshenShaders.metal */,
+				AF0200070000000000000001 /* Shaders/AshenShaders.metal */,
 			);
 			path = ../macos/Sources/AshenFrontierMac;
 			sourceTree = "<group>";
@@ -92,7 +86,7 @@
 		AF0400040000000000000001 /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
-				AF0200080000000000000001 /* AshenFrontierRust.xcframework */,
+				AF0200080000000000000001 /* ../../target/apple/AshenFrontierRust.xcframework */,
 				AF0200090000000000000001 /* Metal.framework */,
 				AF02000A0000000000000001 /* MetalKit.framework */,
 			);
@@ -135,7 +129,7 @@
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
 				LastSwiftUpdateCheck = 1600;
-				LastUpgradeCheck = 1600;
+				LastUpgradeCheck = 2660;
 				TargetAttributes = {
 					AF0500010000000000000001 = {
 						CreatedOnToolsVersion = 16.0;
@@ -176,15 +170,13 @@
 			buildActionMask = 2147483647;
 			files = (
 				AF0100010000000000000001 /* AppDelegate.swift in Sources */,
-				AF0100020000000000000001 /* GameView.swift in Sources */,
-				AF0100030000000000000001 /* GameViewController.swift in Sources */,
-				AF01000C0000000000000001 /* MainMenuViewController.swift in Sources */,
-				AF01000D0000000000000001 /* SettingsViewController.swift in Sources */,
-				AF01000B0000000000000001 /* AppSettings.swift in Sources */,
-				AF0100040000000000000001 /* RustWorld.swift in Sources */,
+					AF0100020000000000000001 /* GameView.swift in Sources */,
+					AF0100030000000000000001 /* GameViewController.swift in Sources */,
+					AF01000C0000000000000001 /* MainMenuViewController.swift in Sources */,
+					AF0100040000000000000001 /* RustWorld.swift in Sources */,
 				AF0100050000000000000001 /* GameController.swift in Sources */,
 				AF0100060000000000000001 /* Renderer.swift in Sources */,
-				AF0100070000000000000001 /* AshenShaders.metal in Sources */,
+				AF0100070000000000000001 /* Shaders/AshenShaders.metal in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -201,7 +193,9 @@
 				CLANG_ENABLE_MODULES = YES;
 				CLANG_ENABLE_OBJC_ARC = YES;
 				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
 				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
 				CLANG_WARN_CONSTANT_CONVERSION = YES;
 				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
 				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
@@ -223,8 +217,10 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = 46SA8UXLBF;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu17;
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_NO_COMMON_BLOCKS = YES;
@@ -244,6 +240,7 @@
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
 				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 			};
@@ -259,7 +256,9 @@
 				CLANG_ENABLE_MODULES = YES;
 				CLANG_ENABLE_OBJC_ARC = YES;
 				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
 				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
 				CLANG_WARN_CONSTANT_CONVERSION = YES;
 				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
 				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
@@ -281,8 +280,10 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = 46SA8UXLBF;
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu17;
 				GCC_NO_COMMON_BLOCKS = YES;
 				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
@@ -295,6 +296,7 @@
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
 				VALIDATE_PRODUCT = YES;
@@ -306,7 +308,6 @@
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(inherited)",
 					"$(SRCROOT)/../../target/apple",
@@ -324,10 +325,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.apexwoot.AshenFrontierIOS;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
-				SWIFT_INCLUDE_PATHS = (
-					"$(inherited)",
-					"$(SRCROOT)/../macos/Sources/AshenFrontierBridge",
-				);
+				SWIFT_INCLUDE_PATHS = "$(inherited) $(SRCROOT)/../macos/Sources/AshenFrontierBridge";
 				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
@@ -338,7 +336,6 @@
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(inherited)",
 					"$(SRCROOT)/../../target/apple",
@@ -356,10 +353,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.apexwoot.AshenFrontierIOS;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
-				SWIFT_INCLUDE_PATHS = (
-					"$(inherited)",
-					"$(SRCROOT)/../macos/Sources/AshenFrontierBridge",
-				);
+				SWIFT_INCLUDE_PATHS = "$(inherited) $(SRCROOT)/../macos/Sources/AshenFrontierBridge";
 				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};

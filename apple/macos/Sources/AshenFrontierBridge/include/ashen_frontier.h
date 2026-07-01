@@ -23,10 +23,18 @@
 
 #define AF_COMMAND_STATUS_INVALID_UNIT_LIST 100
 
+#define AF_UNIT_KIND_WORKER 0
+
+#define AF_UNIT_KIND_RANGER 1
+
+#define AF_UNIT_KIND_SOLDIER 2
+
 typedef struct AfWorld AfWorld;
 
 typedef struct AfEntityPosition {
   uint32_t id;
+  uint32_t kind;
+  float health;
   float x;
   float y;
 } AfEntityPosition;
@@ -42,6 +50,8 @@ void af_world_destroy(struct AfWorld *world);
 void af_world_step(struct AfWorld *world, uint32_t steps);
 
 void af_world_spawn_horde(struct AfWorld *world, uint32_t enemy_count);
+
+uint32_t af_world_spawn_unit(struct AfWorld *world, uint32_t unit_kind);
 
 uint32_t af_world_move_units(struct AfWorld *world,
                              const uint32_t *unit_ids,

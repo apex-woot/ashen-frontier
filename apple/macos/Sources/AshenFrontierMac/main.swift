@@ -13,7 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             fatalError("Metal is not available on this Mac")
         }
 
-        let world = RustWorld(width: 32, height: 24)
+        let world = RustWorld(width: 512, height: 384)
         let controller = GameController(world: world)
         let view = GameView(frame: NSRect(x: 0, y: 0, width: 1280, height: 720), device: device)
         view.colorPixelFormat = .bgra8Unorm
@@ -23,6 +23,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         view.isPaused = false
         view.spawnHorde = {
             controller.spawnHorde()
+        }
+        view.spawnUnit = { kind in
+            controller.spawnUnit(kind: kind)
         }
         view.selectUnit = { point, size in
             controller.selectUnit(at: point, in: size)

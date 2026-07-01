@@ -2,9 +2,8 @@ import MetalKit
 import UIKit
 
 final class GameView: MTKView, UIGestureRecognizerDelegate {
-    var spawnHorde: (() -> Void)?
-    var selectUnit: ((CGPoint, CGSize) -> Void)?
-    var moveSelectedUnits: ((CGPoint, CGSize) -> Void)?
+    var primaryAction: ((CGPoint, CGSize) -> Void)?
+    var selectUnits: ((CGPoint, CGSize) -> Void)?
     var panCamera: ((CGSize, CGSize) -> Void)?
     var zoomCamera: ((CGFloat, CGPoint, CGSize) -> Void)?
 
@@ -21,18 +20,16 @@ final class GameView: MTKView, UIGestureRecognizerDelegate {
         isUserInteractionEnabled = true
         isMultipleTouchEnabled = true
 
-        let selectTap = UITapGestureRecognizer(target: self, action: #selector(handleSelectTap(_:)))
-        selectTap.numberOfTouchesRequired = 1
-        addGestureRecognizer(selectTap)
+        let primaryTap = UITapGestureRecognizer(target: self, action: #selector(handlePrimaryTap(_:)))
+        primaryTap.numberOfTouchesRequired = 1
+        primaryTap.delegate = self
+        addGestureRecognizer(primaryTap)
 
-        let hordeTap = UITapGestureRecognizer(target: self, action: #selector(handleHordeTap(_:)))
-        hordeTap.numberOfTouchesRequired = 2
-        addGestureRecognizer(hordeTap)
-        selectTap.require(toFail: hordeTap)
-
-        let movePress = UILongPressGestureRecognizer(target: self, action: #selector(handleMovePress(_:)))
-        movePress.minimumPressDuration = 0.25
-        addGestureRecognizer(movePress)
+        let areaSelectPress = UILongPressGestureRecognizer(target: self, action: #selector(handleAreaSelectPress(_:)))
+        areaSelectPress.minimumPressDuration = 0.28
+        areaSelectPress.allowableMovement = 14
+        areaSelectPress.delegate = self
+        addGestureRecognizer(areaSelectPress)
 
         let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
         pan.delegate = self
@@ -43,28 +40,20 @@ final class GameView: MTKView, UIGestureRecognizerDelegate {
         addGestureRecognizer(pinch)
     }
 
-    @objc private func handleSelectTap(_ recognizer: UITapGestureRecognizer) {
+    @objc private func handlePrimaryTap(_ recognizer: UITapGestureRecognizer) {
         guard recognizer.state == .ended else {
             return
         }
 
-        selectUnit?(touchPointForWorld(from: recognizer), bounds.size)
+        primaryAction?(touchPointForWorld(from: recognizer), bounds.size)
     }
 
-    @objc private func handleHordeTap(_ recognizer: UITapGestureRecognizer) {
-        guard recognizer.state == .ended else {
-            return
-        }
-
-        spawnHorde?()
-    }
-
-    @objc private func handleMovePress(_ recognizer: UILongPressGestureRecognizer) {
+    @objc private func handleAreaSelectPress(_ recognizer: UILongPressGestureRecognizer) {
         guard recognizer.state == .began else {
             return
         }
 
-        moveSelectedUnits?(touchPointForWorld(from: recognizer), bounds.size)
+        selectUnits?(touchPointForWorld(from: recognizer), bounds.size)
     }
 
     @objc private func handlePan(_ recognizer: UIPanGestureRecognizer) {
@@ -89,7 +78,11 @@ final class GameView: MTKView, UIGestureRecognizerDelegate {
         _ gestureRecognizer: UIGestureRecognizer,
         shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
     ) -> Bool {
-        true
+        gestureRecognizer is UIPinchGestureRecognizer || otherGestureRecognizer is UIPinchGestureRecognizer
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        touch.view === self
     }
 
     private func touchPointForWorld(from recognizer: UIGestureRecognizer) -> CGPoint {

@@ -2,10 +2,10 @@
 
 Native-first RTS prototype.
 
-## Run the Bevy prototype
+## Tooling
 
 ```sh
-cargo run
+cargo install cbindgen
 ```
 
 ## Run the macOS Swift/Metal shell
